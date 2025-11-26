@@ -74,7 +74,11 @@ pub fn draw(f: &mut Frame, app: &App) {
 
 /// Render the thinking panel showing Claude's reasoning
 fn render_thinking_panel(f: &mut Frame, area: Rect, app: &App) {
-    let thinking_content = app.stats.current_thinking.as_deref().unwrap_or("Waiting for thinking...");
+    let thinking_content = app
+        .stats
+        .current_thinking
+        .as_deref()
+        .unwrap_or("Waiting for thinking...");
 
     // Calculate visible lines based on area height
     let height = area.height.saturating_sub(2) as usize; // Account for borders
@@ -87,7 +91,10 @@ fn render_thinking_panel(f: &mut Frame, area: Rect, app: &App) {
     let visible_text = visible_lines.join("\n");
 
     let title = if total_lines > height {
-        format!(" 💭 Thinking ({} lines, ~{} tok) ", total_lines, app.stats.thinking_tokens)
+        format!(
+            " 💭 Thinking ({} lines, ~{} tok) ",
+            total_lines, app.stats.thinking_tokens
+        )
     } else {
         format!(" 💭 Thinking (~{} tok) ", app.stats.thinking_tokens)
     };
@@ -629,7 +636,9 @@ fn event_color_style(event: &ProxyEvent) -> Style {
         ProxyEvent::HeadersCaptured { .. } => Style::default().fg(Color::Gray),
         ProxyEvent::RateLimitUpdate { .. } => Style::default().fg(Color::Yellow),
         ProxyEvent::ApiUsage { .. } => Style::default().fg(Color::LightBlue),
-        ProxyEvent::Thinking { .. } => Style::default().fg(Color::Magenta).add_modifier(Modifier::ITALIC),
+        ProxyEvent::Thinking { .. } => Style::default()
+            .fg(Color::Magenta)
+            .add_modifier(Modifier::ITALIC),
     }
 }
 

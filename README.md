@@ -99,19 +99,19 @@ In a **new terminal**, set the `ANTHROPIC_BASE_URL` environment variable to poin
 #### Windows (PowerShell)
 ```powershell
 $env:ANTHROPIC_BASE_URL="http://127.0.0.1:8080"
-claude-code
+claude
 ```
 
 #### Windows (CMD)
 ```cmd
 set ANTHROPIC_BASE_URL=http://127.0.0.1:8080
-claude-code
+claude
 ```
 
 #### macOS/Linux
 ```bash
 export ANTHROPIC_BASE_URL=http://127.0.0.1:8080
-claude-code
+claude
 ```
 
 > **💡 Why `ANTHROPIC_BASE_URL` instead of `HTTPS_PROXY`?**
@@ -137,8 +137,6 @@ As Claude Code makes API calls, you'll see them appear in the TUI in real-time:
 | `Home` | Jump to first event |
 | `End` | Jump to last event |
 | `q` | Quit the application |
-
-**Tip:** Navigation is debounced to prevent over-sensitive scrolling. When viewing event details, use ↑/↓ to scroll through long content.
 
 ## Log Files
 
@@ -235,8 +233,8 @@ anthropic-spy/
 
 **Solution:**
 1. Verify `ANTHROPIC_BASE_URL` is set correctly in the Claude Code terminal
-2. Check that you're using Claude Code for API calls (not a local model)
-3. Look for errors in the proxy terminal
+2. Look for errors in the proxy terminal
+3. ?
 
 ### "Address already in use"
 

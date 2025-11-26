@@ -173,12 +173,26 @@ impl Parser {
                 "message_start" => {
                     // Extract model and initial usage from message_start
                     if let Some(message) = data.get("message") {
-                        model = message.get("model").and_then(|v| v.as_str()).map(String::from);
+                        model = message
+                            .get("model")
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
 
                         if let Some(usage) = message.get("usage") {
-                            input_tokens = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                            cache_creation_tokens = usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                            cache_read_tokens = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                            input_tokens = usage
+                                .get("input_tokens")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0) as u32;
+                            cache_creation_tokens = usage
+                                .get("cache_creation_input_tokens")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0)
+                                as u32;
+                            cache_read_tokens = usage
+                                .get("cache_read_input_tokens")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0)
+                                as u32;
                         }
                     }
                 }
@@ -188,12 +202,23 @@ impl Parser {
                     let index = data.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
 
                     if let Some(content_block) = data.get("content_block") {
-                        let block_type = content_block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        let block_type = content_block
+                            .get("type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
 
                         let partial = match block_type {
                             "tool_use" => {
-                                let id = content_block.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                let name = content_block.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                let id = content_block
+                                    .get("id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let name = content_block
+                                    .get("name")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
 
                                 PartialContentBlock::ToolUse {
                                     id,
@@ -202,12 +227,10 @@ impl Parser {
                                     timestamp: Utc::now(),
                                 }
                             }
-                            "thinking" => {
-                                PartialContentBlock::Thinking {
-                                    content: String::new(),
-                                    timestamp: Utc::now(),
-                                }
-                            }
+                            "thinking" => PartialContentBlock::Thinking {
+                                content: String::new(),
+                                timestamp: Utc::now(),
+                            },
                             _ => PartialContentBlock::Other,
                         };
 
@@ -224,15 +247,25 @@ impl Parser {
 
                         if let Some(partial) = partial_blocks.get_mut(&index) {
                             match (partial, delta_type) {
-                                (PartialContentBlock::ToolUse { input_json, .. }, "input_json_delta") => {
+                                (
+                                    PartialContentBlock::ToolUse { input_json, .. },
+                                    "input_json_delta",
+                                ) => {
                                     // Accumulate JSON string fragments
-                                    if let Some(partial_json) = delta.get("partial_json").and_then(|v| v.as_str()) {
+                                    if let Some(partial_json) =
+                                        delta.get("partial_json").and_then(|v| v.as_str())
+                                    {
                                         input_json.push_str(partial_json);
                                     }
                                 }
-                                (PartialContentBlock::Thinking { content, .. }, "thinking_delta") => {
+                                (
+                                    PartialContentBlock::Thinking { content, .. },
+                                    "thinking_delta",
+                                ) => {
                                     // Accumulate thinking text
-                                    if let Some(thinking) = delta.get("thinking").and_then(|v| v.as_str()) {
+                                    if let Some(thinking) =
+                                        delta.get("thinking").and_then(|v| v.as_str())
+                                    {
                                         content.push_str(thinking);
                                     }
                                 }
@@ -248,12 +281,17 @@ impl Parser {
 
                     if let Some(partial) = partial_blocks.remove(&index) {
                         match partial {
-                            PartialContentBlock::ToolUse { id, name, input_json, timestamp } => {
+                            PartialContentBlock::ToolUse {
+                                id,
+                                name,
+                                input_json,
+                                timestamp,
+                            } => {
                                 // Parse the accumulated JSON string into a Value
                                 let input: serde_json::Value = if input_json.is_empty() {
                                     serde_json::Value::Object(serde_json::Map::new())
                                 } else {
-                                    serde_json::from_str(&input_json).unwrap_or_else(|_| {
+                                    serde_json::from_str(&input_json).unwrap_or({
                                         // If parsing fails, store as raw string
                                         serde_json::Value::String(input_json)
                                     })
@@ -287,7 +325,10 @@ impl Parser {
                 "message_delta" => {
                     // Extract output tokens from message_delta
                     if let Some(usage) = data.get("usage") {
-                        output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                        output_tokens = usage
+                            .get("output_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0) as u32;
                     }
                 }
 
@@ -298,20 +339,35 @@ impl Parser {
         // Emit any remaining partial blocks (shouldn't happen with well-formed SSE)
         for (_, partial) in partial_blocks {
             match partial {
-                PartialContentBlock::ToolUse { id, name, input_json, timestamp } => {
+                PartialContentBlock::ToolUse {
+                    id,
+                    name,
+                    input_json,
+                    timestamp,
+                } => {
                     let input: serde_json::Value = if input_json.is_empty() {
                         serde_json::Value::Object(serde_json::Map::new())
                     } else {
-                        serde_json::from_str(&input_json).unwrap_or(serde_json::Value::String(input_json))
+                        serde_json::from_str(&input_json)
+                            .unwrap_or(serde_json::Value::String(input_json))
                     };
 
                     pending.insert(id.clone(), (name.clone(), timestamp));
-                    events.push(ProxyEvent::ToolCall { id, timestamp, tool_name: name, input });
+                    events.push(ProxyEvent::ToolCall {
+                        id,
+                        timestamp,
+                        tool_name: name,
+                        input,
+                    });
                 }
                 PartialContentBlock::Thinking { content, timestamp } => {
                     if !content.is_empty() {
                         let token_estimate = (content.len() / 4) as u32;
-                        events.push(ProxyEvent::Thinking { timestamp, content, token_estimate });
+                        events.push(ProxyEvent::Thinking {
+                            timestamp,
+                            content,
+                            token_estimate,
+                        });
                     }
                 }
                 PartialContentBlock::Other => {}
