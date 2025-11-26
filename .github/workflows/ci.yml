@@ -1,6 +1,6 @@
 # CI workflow - runs on every PR and push to main
 #
-# Checks: formatting, linting, tests, and build
+# Checks: commit messages, formatting, linting, tests, and build
 
 name: CI
 
@@ -15,6 +15,69 @@ env:
   RUSTFLAGS: -Dwarnings
 
 jobs:
+  # Validate commit messages follow Conventional Commits
+  commits:
+    name: Commit Messages
+    runs-on: ubuntu-latest
+    # Only run on PRs (push to main already validated via PR)
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for commit range
+
+      - name: Validate commits
+        run: |
+          # Get commits in this PR
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+
+          echo "Checking commits from $BASE to $HEAD"
+          echo ""
+
+          # Conventional commit pattern
+          PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\([a-z0-9_-]+\))?(!)?: .+"
+
+          FAILED=0
+
+          for COMMIT in $(git rev-list "$BASE".."$HEAD"); do
+            MSG=$(git log --format=%s -n 1 "$COMMIT")
+
+            # Skip merge commits
+            if echo "$MSG" | grep -qE "^Merge "; then
+              echo "⏭️  Skip merge: $MSG"
+              continue
+            fi
+
+            if echo "$MSG" | grep -qE "$PATTERN"; then
+              echo "✅ $MSG"
+            else
+              echo "❌ $MSG"
+              FAILED=1
+            fi
+          done
+
+          echo ""
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "=========================================="
+            echo "ERROR: Some commits don't follow Conventional Commits"
+            echo ""
+            echo "Expected format: <type>(<scope>): <description>"
+            echo ""
+            echo "Types: feat, fix, docs, style, refactor, perf, test, chore, ci, build, revert"
+            echo ""
+            echo "Examples:"
+            echo "  feat(tui): add filtering by tool name"
+            echo "  fix(parser): handle empty SSE delta"
+            echo "  docs: update contributing guide"
+            echo "  refactor!: restructure event system"
+            echo "=========================================="
+            exit 1
+          fi
+
+          echo "All commits follow Conventional Commits format! 🎉"
+
   check:
     name: Check
     runs-on: ubuntu-latest
