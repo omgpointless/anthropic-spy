@@ -316,3 +316,4 @@ This prevents double-triggering regardless of poll rate.
 - **Architecture Deep Dive:** See `.claude/ARCHITECTURE.md`
 - **Project Status:** See `.claude/PROJECT_STATUS.md`
 - **Messaging Guidelines:** See `.claude/TONE_GUIDE.md`
+- When suggesting commit titles, note that the developer prefers the syntax of conventional commits
