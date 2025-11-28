@@ -85,8 +85,8 @@ pub fn maybe_inject_context_warning(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
     use crate::ContextState;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn test_generate_context_warning() {

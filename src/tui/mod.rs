@@ -19,7 +19,6 @@ use crate::logging::LogBuffer;
 use crate::StreamingThinking;
 use anyhow::{Context, Result};
 use app::{App, View};
-use modal::{Modal, ModalAction};
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
@@ -28,6 +27,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use modal::{Modal, ModalAction};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::time::Duration;

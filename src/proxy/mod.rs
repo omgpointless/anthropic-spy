@@ -308,10 +308,7 @@ async fn proxy_handler(
 
     // Build the forwarded request
     // With reqwest 0.12, Method types align with axum (both use http 1.0 crate)
-    let mut forward_req = state
-        .client
-        .request(method, &forward_url)
-        .body(final_body);
+    let mut forward_req = state.client.request(method, &forward_url).body(final_body);
 
     // Copy relevant headers (types align between axum and reqwest 0.12)
     for (key, value) in headers.iter() {

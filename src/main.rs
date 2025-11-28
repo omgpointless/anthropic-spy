@@ -183,7 +183,8 @@ async fn main() -> Result<()> {
 
     // Create shared context state for interceptor injection
     // Parser updates this on ApiUsage, interceptor reads to decide injection
-    let context_state: SharedContextState = Arc::new(Mutex::new(ContextState::new(config.context_limit)));
+    let context_state: SharedContextState =
+        Arc::new(Mutex::new(ContextState::new(config.context_limit)));
 
     // Spawn the storage task (if enabled)
     // This runs in the background, writing events to disk

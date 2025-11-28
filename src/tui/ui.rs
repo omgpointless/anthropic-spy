@@ -222,7 +222,11 @@ fn render_tokens_panel(f: &mut Frame, area: Rect, stats: &crate::events::Stats) 
             let pct = (value as f64 / total as f64) * 100.0;
             // Cap at bar_width - 1 to always show some background
             let filled = ((pct / 100.0) * bar_width as f64).round() as usize;
-            let filled = if value > 0 { filled.max(1).min(bar_width - 1) } else { 0 };
+            let filled = if value > 0 {
+                filled.max(1).min(bar_width - 1)
+            } else {
+                0
+            };
             let empty = bar_width - filled;
 
             Line::from(vec![
@@ -231,9 +235,14 @@ fn render_tokens_panel(f: &mut Frame, area: Rect, stats: &crate::events::Stats) 
                 Span::styled("░".repeat(empty), Style::default().fg(Color::DarkGray)),
                 Span::styled(
                     format!(" {:>7} ", format_compact_number(value)),
-                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
                 ),
-                Span::styled(format!("{:>5.1}%", pct), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{:>5.1}%", pct),
+                    Style::default().fg(Color::DarkGray),
+                ),
             ])
         };
 
@@ -1320,7 +1329,9 @@ fn format_log_entry(entry: &LogEntry) -> String {
 /// Get color style for log level (uses theme colors for consistency)
 fn log_level_style(level: &LogLevel, theme: &Theme) -> Style {
     match level {
-        LogLevel::Error => Style::default().fg(theme.error).add_modifier(Modifier::BOLD),
+        LogLevel::Error => Style::default()
+            .fg(theme.error)
+            .add_modifier(Modifier::BOLD),
         LogLevel::Warn => Style::default().fg(theme.rate_limit),
         LogLevel::Info => Style::default().fg(theme.api_usage),
         LogLevel::Debug => Style::default().fg(theme.headers),

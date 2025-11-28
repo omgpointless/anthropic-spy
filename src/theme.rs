@@ -60,25 +60,25 @@ impl Theme {
     pub fn basic() -> Self {
         Self {
             name: "basic".to_string(),
-            tool_call: Color::Rgb(0x56, 0xb6, 0xc2),    // cyan
+            tool_call: Color::Rgb(0x56, 0xb6, 0xc2), // cyan
             tool_result_ok: Color::Rgb(0x98, 0xc3, 0x79), // green
             tool_result_fail: Color::Rgb(0xe0, 0x6c, 0x75), // red
-            request: Color::Rgb(0x61, 0xaf, 0xef),      // blue
-            response: Color::Rgb(0xc6, 0x78, 0xdd),     // magenta
-            error: Color::Rgb(0xe0, 0x6c, 0x75),        // red
-            thinking: Color::Rgb(0xc6, 0x78, 0xdd),     // magenta
-            api_usage: Color::Rgb(0x61, 0xaf, 0xef),    // blue
-            headers: Color::Rgb(0x5c, 0x63, 0x70),      // gray
-            rate_limit: Color::Rgb(0xe5, 0xc0, 0x7b),   // yellow
+            request: Color::Rgb(0x61, 0xaf, 0xef),   // blue
+            response: Color::Rgb(0xc6, 0x78, 0xdd),  // magenta
+            error: Color::Rgb(0xe0, 0x6c, 0x75),     // red
+            thinking: Color::Rgb(0xc6, 0x78, 0xdd),  // magenta
+            api_usage: Color::Rgb(0x61, 0xaf, 0xef), // blue
+            headers: Color::Rgb(0x5c, 0x63, 0x70),   // gray
+            rate_limit: Color::Rgb(0xe5, 0xc0, 0x7b), // yellow
             context_compact: Color::Rgb(0xd1, 0x9a, 0x66), // orange
             // Muted gauge fills for white text contrast
-            context_bar_fill: Color::Rgb(0x4b, 0x61, 0x3c),   // muted green
-            context_bar_warn: Color::Rgb(0x72, 0x60, 0x3d),   // muted yellow
+            context_bar_fill: Color::Rgb(0x4b, 0x61, 0x3c), // muted green
+            context_bar_warn: Color::Rgb(0x72, 0x60, 0x3d), // muted yellow
             context_bar_danger: Color::Rgb(0x70, 0x36, 0x3a), // muted red
-            status_bar: Color::Rgb(0x98, 0xc3, 0x79),   // green
-            title: Color::Rgb(0x56, 0xb6, 0xc2),        // cyan
-            border: Color::Rgb(0xab, 0xb2, 0xbf),       // off-white
-            highlight: Color::Rgb(0xe5, 0xc0, 0x7b),    // yellow
+            status_bar: Color::Rgb(0x98, 0xc3, 0x79),       // green
+            title: Color::Rgb(0x56, 0xb6, 0xc2),            // cyan
+            border: Color::Rgb(0xab, 0xb2, 0xbf),           // off-white
+            highlight: Color::Rgb(0xe5, 0xc0, 0x7b),        // yellow
             // Panel identity colors
             panel_events: Color::Rgb(0x56, 0xb6, 0xc2), // cyan
             panel_thinking: Color::Rgb(0xc6, 0x78, 0xdd), // magenta
