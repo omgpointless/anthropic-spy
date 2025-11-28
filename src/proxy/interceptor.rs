@@ -103,12 +103,19 @@ pub fn maybe_generate_sse_injection(
     // Mark that we warned at this threshold
     ctx.mark_warned(threshold);
 
+    // Tiered messaging - informative at low thresholds, actionable at high
+    let message = match percent {
+        95.. => format!("Context at {}% ({}K/{}K). `/compact` recommended.", percent, current_k, limit_k),
+        85..=94 => format!("Context at {}% ({}K/{}K). Consider `/compact` soon.", percent, current_k, limit_k),
+        _ => format!("Context at {}% ({}K/{}K).", percent, current_k, limit_k),
+    };
+
     // Build the annotation text
     let annotation = format!(
         "\n\n`★ anthropic-spy (context) ─────────────────────────────`\n\
-         Context at {}% ({}K/{}K). Consider `/compact` to free space.\n\
+         {}\n\
          `─────────────────────────────────────────────────────────`",
-        percent, current_k, limit_k
+        message
     );
 
     // Generate SSE events for a new content block
@@ -120,7 +127,7 @@ pub fn maybe_generate_sse_injection(
     );
 
     tracing::info!(
-        "Context warning: {}% ({}K/{}K) → injecting at index {}",
+        "Context: {}% ({}K/{}K) #{}",
         percent, current_k, limit_k, next_block_index
     );
 

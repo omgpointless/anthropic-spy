@@ -480,9 +480,9 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                                     let is_haiku = response_model.to_lowercase().contains("haiku");
 
                                     if is_tool_use {
-                                        tracing::info!("SSE: tool_use response, skipping injection");
+                                        tracing::debug!("SSE: tool_use response, skipping injection");
                                     } else if is_haiku {
-                                        tracing::info!("SSE: Haiku response ({}), skipping injection", response_model);
+                                        tracing::debug!("SSE: Haiku response ({}), skipping injection", response_model);
                                     } else if is_end_turn {
                                         // Safe to inject on main conversation response
                                         if let Some(injection) =
