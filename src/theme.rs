@@ -31,6 +31,16 @@ pub struct Theme {
     pub title: Color,
     pub border: Color,
     pub highlight: Color,
+
+    // Panel identity colors (used when focused) - integration pending
+    #[allow(dead_code)]
+    pub panel_events: Color,
+    #[allow(dead_code)]
+    pub panel_thinking: Color,
+    #[allow(dead_code)]
+    pub panel_logs: Color,
+    #[allow(dead_code)]
+    pub panel_detail: Color,
 }
 
 impl Theme {
@@ -69,6 +79,11 @@ impl Theme {
             title: Color::Cyan,
             border: Color::White,
             highlight: Color::Yellow,
+            // Panel identity colors
+            panel_events: Color::Cyan,
+            panel_thinking: Color::Magenta,
+            panel_logs: Color::DarkGray,
+            panel_detail: Color::Yellow,
         }
     }
 
@@ -89,12 +104,17 @@ impl Theme {
             context_compact: Color::Rgb(0xff, 0xb8, 0x6c), // orange
             // Muted gauge fills for white text contrast
             context_bar_fill: Color::Rgb(0x28, 0x7d, 0x3d), // muted green
-            context_bar_warn: Color::Rgb(0x78, 0x7d, 0x46),  // muted yellow
+            context_bar_warn: Color::Rgb(0x78, 0x7d, 0x46), // muted yellow
             context_bar_danger: Color::Rgb(0x80, 0x2a, 0x2a), // muted red
-            status_bar: Color::Rgb(0x50, 0xfa, 0x7b), // green
-            title: Color::Rgb(0x8b, 0xe9, 0xfd),     // cyan
-            border: Color::Rgb(0x62, 0x72, 0xa4),    // comment
-            highlight: Color::Rgb(0xf1, 0xfa, 0x8c), // yellow
+            status_bar: Color::Rgb(0x50, 0xfa, 0x7b),       // green
+            title: Color::Rgb(0x8b, 0xe9, 0xfd),            // cyan
+            border: Color::Rgb(0x62, 0x72, 0xa4),           // comment
+            highlight: Color::Rgb(0xf1, 0xfa, 0x8c),        // yellow
+            // Panel identity colors
+            panel_events: Color::Rgb(0x8b, 0xe9, 0xfd), // cyan
+            panel_thinking: Color::Rgb(0xbd, 0x93, 0xf9), // purple
+            panel_logs: Color::Rgb(0x62, 0x72, 0xa4),   // comment
+            panel_detail: Color::Rgb(0xf1, 0xfa, 0x8c), // yellow
         }
     }
 
@@ -115,12 +135,17 @@ impl Theme {
             context_compact: Color::Rgb(0xfd, 0x97, 0x1f), // orange
             // Muted gauge fills for white text contrast
             context_bar_fill: Color::Rgb(0x53, 0x71, 0x17), // muted green
-            context_bar_warn: Color::Rgb(0x73, 0x6d, 0x3a),  // muted yellow
+            context_bar_warn: Color::Rgb(0x73, 0x6d, 0x3a), // muted yellow
             context_bar_danger: Color::Rgb(0x7c, 0x13, 0x39), // muted pink
-            status_bar: Color::Rgb(0xa6, 0xe2, 0x2e), // green
-            title: Color::Rgb(0x66, 0xd9, 0xef),     // blue
-            border: Color::Rgb(0x75, 0x71, 0x5e),    // comment
-            highlight: Color::Rgb(0xe6, 0xdb, 0x74), // yellow
+            status_bar: Color::Rgb(0xa6, 0xe2, 0x2e),       // green
+            title: Color::Rgb(0x66, 0xd9, 0xef),            // blue
+            border: Color::Rgb(0x75, 0x71, 0x5e),           // comment
+            highlight: Color::Rgb(0xe6, 0xdb, 0x74),        // yellow
+            // Panel identity colors
+            panel_events: Color::Rgb(0x66, 0xd9, 0xef), // blue
+            panel_thinking: Color::Rgb(0xae, 0x81, 0xff), // purple
+            panel_logs: Color::Rgb(0x75, 0x71, 0x5e),   // comment
+            panel_detail: Color::Rgb(0xe6, 0xdb, 0x74), // yellow
         }
     }
 
@@ -141,12 +166,17 @@ impl Theme {
             context_compact: Color::Rgb(0xfc, 0x98, 0x67), // orange
             // Muted gauge fills for white text contrast
             context_bar_fill: Color::Rgb(0x54, 0x6e, 0x3b), // muted green
-            context_bar_warn: Color::Rgb(0x80, 0x6c, 0x33),  // muted yellow
+            context_bar_warn: Color::Rgb(0x80, 0x6c, 0x33), // muted yellow
             context_bar_danger: Color::Rgb(0x80, 0x30, 0x44), // muted red
-            status_bar: Color::Rgb(0xa9, 0xdc, 0x76), // green
-            title: Color::Rgb(0x78, 0xdc, 0xe8),     // blue
-            border: Color::Rgb(0x72, 0x70, 0x72),    // comment gray
-            highlight: Color::Rgb(0xff, 0xd8, 0x66), // yellow
+            status_bar: Color::Rgb(0xa9, 0xdc, 0x76),       // green
+            title: Color::Rgb(0x78, 0xdc, 0xe8),            // blue
+            border: Color::Rgb(0x72, 0x70, 0x72),           // comment gray
+            highlight: Color::Rgb(0xff, 0xd8, 0x66),        // yellow
+            // Panel identity colors
+            panel_events: Color::Rgb(0x78, 0xdc, 0xe8), // blue
+            panel_thinking: Color::Rgb(0xab, 0x9d, 0xf2), // purple
+            panel_logs: Color::Rgb(0x72, 0x70, 0x72),   // comment gray
+            panel_detail: Color::Rgb(0xff, 0xd8, 0x66), // yellow
         }
     }
 
@@ -167,12 +197,17 @@ impl Theme {
             context_compact: Color::Rgb(0xd0, 0x87, 0x70), // aurora orange
             // Muted gauge fills for white text contrast
             context_bar_fill: Color::Rgb(0x51, 0x5f, 0x46), // muted green
-            context_bar_warn: Color::Rgb(0x75, 0x65, 0x45),  // muted yellow
+            context_bar_warn: Color::Rgb(0x75, 0x65, 0x45), // muted yellow
             context_bar_danger: Color::Rgb(0x5f, 0x30, 0x35), // muted red
-            status_bar: Color::Rgb(0xa3, 0xbe, 0x8c), // green
-            title: Color::Rgb(0x88, 0xc0, 0xd0),     // frost cyan
-            border: Color::Rgb(0x4c, 0x56, 0x6a),    // polar night
-            highlight: Color::Rgb(0xeb, 0xcb, 0x8b), // yellow
+            status_bar: Color::Rgb(0xa3, 0xbe, 0x8c),       // green
+            title: Color::Rgb(0x88, 0xc0, 0xd0),            // frost cyan
+            border: Color::Rgb(0x4c, 0x56, 0x6a),           // polar night
+            highlight: Color::Rgb(0xeb, 0xcb, 0x8b),        // yellow
+            // Panel identity colors
+            panel_events: Color::Rgb(0x88, 0xc0, 0xd0), // frost cyan
+            panel_thinking: Color::Rgb(0xb4, 0x8e, 0xad), // aurora purple
+            panel_logs: Color::Rgb(0x4c, 0x56, 0x6a),   // polar night
+            panel_detail: Color::Rgb(0xeb, 0xcb, 0x8b), // yellow
         }
     }
 
@@ -193,12 +228,37 @@ impl Theme {
             context_compact: Color::Rgb(0xfe, 0x80, 0x19), // orange
             // Muted gauge fills for white text contrast
             context_bar_fill: Color::Rgb(0x5c, 0x5d, 0x13), // muted green
-            context_bar_warn: Color::Rgb(0x7d, 0x5e, 0x17),  // muted yellow
+            context_bar_warn: Color::Rgb(0x7d, 0x5e, 0x17), // muted yellow
             context_bar_danger: Color::Rgb(0x7d, 0x24, 0x1a), // muted red
-            status_bar: Color::Rgb(0xb8, 0xbb, 0x26), // green
-            title: Color::Rgb(0x83, 0xa5, 0x98),     // aqua
-            border: Color::Rgb(0x92, 0x83, 0x74),    // gray
-            highlight: Color::Rgb(0xfa, 0xbd, 0x2f), // yellow
+            status_bar: Color::Rgb(0xb8, 0xbb, 0x26),       // green
+            title: Color::Rgb(0x83, 0xa5, 0x98),            // aqua
+            border: Color::Rgb(0x92, 0x83, 0x74),           // gray
+            highlight: Color::Rgb(0xfa, 0xbd, 0x2f),        // yellow
+            // Panel identity colors
+            panel_events: Color::Rgb(0x83, 0xa5, 0x98), // aqua
+            panel_thinking: Color::Rgb(0xd3, 0x86, 0x9b), // purple
+            panel_logs: Color::Rgb(0x92, 0x83, 0x74),   // gray
+            panel_detail: Color::Rgb(0xfa, 0xbd, 0x2f), // yellow
+        }
+    }
+}
+
+impl Theme {
+    /// Get border color for a panel based on focus state
+    ///
+    /// Focused panels use their identity color, unfocused use the general border color.
+    /// This creates clear visual distinction while preserving panel identity.
+    #[allow(dead_code)] // Integration pending - will be used for focus visualization
+    pub fn panel_border(&self, panel: crate::tui::scroll::FocusablePanel, focused: bool) -> Color {
+        if focused {
+            match panel {
+                crate::tui::scroll::FocusablePanel::Events => self.panel_events,
+                crate::tui::scroll::FocusablePanel::Thinking => self.panel_thinking,
+                crate::tui::scroll::FocusablePanel::Logs => self.panel_logs,
+                crate::tui::scroll::FocusablePanel::Detail => self.panel_detail,
+            }
+        } else {
+            self.border
         }
     }
 }

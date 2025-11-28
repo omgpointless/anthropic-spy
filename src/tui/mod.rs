@@ -9,6 +9,8 @@
 pub mod app;
 pub mod input;
 pub mod layout;
+pub mod scroll;
+pub mod streaming;
 pub mod ui;
 
 use crate::events::ProxyEvent;

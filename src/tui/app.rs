@@ -4,11 +4,15 @@
 // of events, selected item, statistics, and UI state.
 
 use super::input::InputHandler;
+use super::streaming::StreamingStateMachine;
 use crate::events::{ProxyEvent, Stats};
 use crate::logging::LogBuffer;
 use crate::theme::Theme;
 use crate::StreamingThinking;
 use std::time::{Duration, Instant};
+
+// Re-export StreamingState for backward compatibility with ui.rs
+pub use super::streaming::StreamingState;
 
 /// Debounce duration for action keys (Enter, Esc, q)
 /// Prevents rapid-fire triggers on terminals that don't send release events
@@ -21,19 +25,6 @@ pub enum View {
     Events,
     Stats,
     Help,
-}
-
-/// Streaming state for header animation
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum StreamingState {
-    #[default]
-    Idle,
-    /// Claude is thinking (extended thinking block active)
-    Thinking,
-    /// Claude is generating response
-    Generating,
-    /// Waiting for user to approve tool call (Edit/Write/Bash)
-    AwaitingApproval,
 }
 
 /// Topic info extracted from Haiku's summarization
@@ -87,8 +78,8 @@ pub struct App {
     /// Color theme for the UI
     pub theme: Theme,
 
-    /// Current streaming state (for header animation)
-    pub streaming_state: StreamingState,
+    /// Streaming state machine (for header animation)
+    streaming_sm: StreamingStateMachine,
 
     /// Animation frame counter (increments each render tick)
     pub animation_frame: usize,
@@ -119,10 +110,15 @@ impl App {
             topic: TopicInfo::default(),
             view: View::default(),
             theme: Theme::default(),
-            streaming_state: StreamingState::default(),
+            streaming_sm: StreamingStateMachine::new(),
             animation_frame: 0,
             streaming_thinking: None,
         }
+    }
+
+    /// Get current streaming state (for UI display)
+    pub fn streaming_state(&self) -> StreamingState {
+        self.streaming_sm.state()
     }
 
     /// Advance animation frame (call on each render tick)
@@ -208,8 +204,7 @@ impl App {
         match &event {
             ProxyEvent::Request { .. } => {
                 self.stats.total_requests += 1;
-                // Request sent - Claude is about to generate
-                self.streaming_state = StreamingState::Generating;
+                self.streaming_sm.on_request();
             }
             ProxyEvent::Response {
                 status, ttfb, body, ..
@@ -229,8 +224,7 @@ impl App {
                     self.topic = topic_info;
                 }
 
-                // Response complete - back to idle
-                self.streaming_state = StreamingState::Idle;
+                self.streaming_sm.on_response();
             }
             ProxyEvent::ToolCall { tool_name, .. } => {
                 self.stats.total_tool_calls += 1;
@@ -241,13 +235,7 @@ impl App {
                     .entry(tool_name.clone())
                     .or_insert(0) += 1;
 
-                // ToolCall means generation is done - Claude decided what to do
-                // Tools needing approval wait, others go idle (auto-executed)
-                if Self::tool_needs_approval(tool_name) {
-                    self.streaming_state = StreamingState::AwaitingApproval;
-                } else {
-                    self.streaming_state = StreamingState::Idle;
-                }
+                self.streaming_sm.on_tool_call(tool_name);
             }
             ProxyEvent::ToolResult {
                 tool_name,
@@ -268,8 +256,7 @@ impl App {
                     self.stats.failed_tool_calls += 1;
                 }
 
-                // Tool result received - back to idle (next Request will set Generating)
-                self.streaming_state = StreamingState::Idle;
+                self.streaming_sm.on_tool_result();
             }
             ProxyEvent::ApiUsage {
                 model,
@@ -308,25 +295,25 @@ impl App {
                 model_tokens.cache_read += *cache_read_tokens as u64;
                 model_tokens.cache_creation += *cache_creation_tokens as u64;
                 model_tokens.calls += 1;
+
+                self.streaming_sm.on_api_usage();
             }
             ProxyEvent::Thinking {
                 content,
                 token_estimate,
                 ..
             } => {
-                // Track thinking blocks
+                // Track thinking blocks (stats only - no state transition)
+                // This event arrives post-stream from the parser with complete content.
+                // ThinkingStarted handles real-time state; ApiUsage is the terminal event.
                 self.stats.thinking_blocks += 1;
                 self.stats.thinking_tokens += *token_estimate as u64;
 
                 // Store current thinking for the dedicated panel
                 self.stats.current_thinking = Some(content.clone());
-
-                // Full thinking block arrived - thinking done, now generating
-                self.streaming_state = StreamingState::Generating;
             }
             ProxyEvent::ThinkingStarted { .. } => {
-                // Thinking just started
-                self.streaming_state = StreamingState::Thinking;
+                self.streaming_sm.on_thinking_started();
             }
             ProxyEvent::ContextCompact { new_context, .. } => {
                 // Context was compacted - update stats
@@ -448,11 +435,6 @@ impl App {
             title,
             is_new_topic,
         })
-    }
-
-    /// Check if a tool requires user approval before execution
-    fn tool_needs_approval(tool_name: &str) -> bool {
-        matches!(tool_name, "Edit" | "Write" | "Bash" | "NotebookEdit")
     }
 
     /// Calculate visible range for the event list given viewport height

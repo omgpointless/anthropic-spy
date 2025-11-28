@@ -564,11 +564,11 @@ fn render_thinking_panel(f: &mut Frame, area: Rect, app: &App) {
 /// Render the title bar
 fn render_title(f: &mut Frame, area: Rect, app: &App) {
     // Build streaming indicator
-    let streaming_indicator = match app.streaming_state {
+    let streaming_indicator = match app.streaming_state() {
         StreamingState::Idle => String::new(),
         StreamingState::Thinking => format!(" {} thinking", app.spinner_char()),
         StreamingState::Generating => format!(" {} generating", app.spinner_char()),
-        StreamingState::AwaitingApproval => " ⏸ awaiting approval".to_string(),
+        StreamingState::Executing => format!(" {} executing", app.spinner_char()),
     };
 
     let title_text = match &app.topic.title {
@@ -604,21 +604,35 @@ fn render_context_bar(f: &mut Frame, area: Rect, app: &App) {
 
     let (label, pct, color) = if stats.current_context_tokens > 0 {
         let pct = stats.context_usage_percent().unwrap_or(0.0);
-        let color = if pct >= 90.0 {
+        let over_limit = pct >= 100.0;
+
+        let color = if over_limit {
+            // Over limit: compact is pending, use warning color
+            app.theme.context_bar_warn
+        } else if pct >= 90.0 {
             app.theme.context_bar_danger
         } else if pct >= 70.0 {
             app.theme.context_bar_warn
         } else {
             app.theme.context_bar_fill
         };
-        // Show actual token count with comma formatting for detail
-        let label = format!(
-            "Context: {} / {} ({:.1}%)",
-            format_number(stats.current_context_tokens),
-            format_number(stats.context_limit()),
-            pct
-        );
-        (label, pct, color)
+
+        let label = if over_limit {
+            // Don't show embarrassing >100%, signal compact is pending
+            format!(
+                "Context: {} / {} (~100%, compact pending)",
+                format_number(stats.current_context_tokens),
+                format_number(stats.context_limit()),
+            )
+        } else {
+            format!(
+                "Context: {} / {} ({:.1}%)",
+                format_number(stats.current_context_tokens),
+                format_number(stats.context_limit()),
+                pct
+            )
+        };
+        (label, pct.min(100.0), color) // Cap display at 100%
     } else {
         (
             "Context: waiting for API call...".to_string(),
@@ -629,7 +643,7 @@ fn render_context_bar(f: &mut Frame, area: Rect, app: &App) {
 
     let gauge = Gauge::default()
         .gauge_style(Style::default().fg(color).bg(Color::Black))
-        .percent(pct.min(100.0) as u16)
+        .percent(pct as u16)
         .label(Span::styled(
             label,
             Style::default()

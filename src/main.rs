@@ -17,6 +17,7 @@ mod logging;
 mod parser;
 mod pricing;
 mod proxy;
+mod startup;
 mod storage;
 mod theme;
 mod tui;
@@ -84,9 +85,10 @@ async fn main() -> Result<()> {
     // Generate session ID for this run
     let session_id = generate_session_id();
 
-    tracing::info!("Starting Anthropic Spy");
-    tracing::info!("Session ID: {}", session_id);
-    tracing::info!("Configuration: {:?}", config);
+    // Print startup banner (before TUI takes over screen)
+    startup::print_startup(&config);
+    startup::log_startup(&config);
+    tracing::debug!("Session ID: {}", session_id);
 
     // Create event channels
     // We use bounded channels with a buffer size of 1000 events
@@ -103,15 +105,22 @@ async fn main() -> Result<()> {
     // Proxy writes thinking_delta content here, TUI reads it for real-time display
     let streaming_thinking: StreamingThinking = Arc::new(Mutex::new(String::new()));
 
-    // Spawn the storage task
+    // Spawn the storage task (if enabled)
     // This runs in the background, writing events to disk
-    let storage_config = config.clone();
-    let storage_session_id = session_id.clone();
-    let storage_handle = tokio::spawn(async move {
-        let storage = Storage::new(storage_config.log_dir, storage_session_id, event_rx_storage)
-            .expect("Failed to create storage");
-        storage.run().await
-    });
+    let storage_handle = if config.features.storage {
+        let storage_config = config.clone();
+        let storage_session_id = session_id.clone();
+        Some(tokio::spawn(async move {
+            let storage =
+                Storage::new(storage_config.log_dir, storage_session_id, event_rx_storage)
+                    .expect("Failed to create storage");
+            storage.run().await
+        }))
+    } else {
+        // Drop the receiver so senders don't block
+        drop(event_rx_storage);
+        None
+    };
 
     // Spawn the proxy server task (or demo task in demo mode)
     // This runs in the background, handling HTTP requests
@@ -170,7 +179,10 @@ async fn main() -> Result<()> {
 
     // Wait for background tasks to finish
     // The channels will be automatically dropped when the proxy task completes
-    let _ = tokio::join!(storage_handle, proxy_handle);
+    let _ = proxy_handle.await;
+    if let Some(handle) = storage_handle {
+        let _ = handle.await;
+    }
 
     tracing::info!("Shutdown complete");
     Ok(())

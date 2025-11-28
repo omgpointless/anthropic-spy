@@ -53,7 +53,7 @@ impl Parser {
     ///
     /// Compaction is detected when:
     /// 1. This is a non-Haiku model (Haiku is dispatcher, never has cache)
-    /// 2. cache_read_tokens drops to 0
+    /// 2. Cache dropped significantly (>30% decrease OR >30K token drop)
     /// 3. Previous cache was >10K tokens (avoids false positives on first call)
     ///
     /// Returns Some(ContextCompact) if compact detected, None otherwise
@@ -70,26 +70,32 @@ impl Parser {
 
         let mut state = self.compact_state.lock().await;
         let current_context = input_tokens as u64 + cache_read_tokens as u64;
+        let cache = cache_read_tokens as u64;
+        let prev_cache = state.last_cached_tokens;
 
-        // Check for compact: cache dropped from >10K to 0
-        let compact_event = if cache_read_tokens == 0 && state.last_cached_tokens > 10_000 {
+        // Detect significant cache drop (compact doesn't always go to zero)
+        // Triggers on: >30% drop OR >30K absolute drop
+        let significant_drop = prev_cache > 10_000
+            && (cache < prev_cache.saturating_sub(30_000) || cache < prev_cache * 70 / 100);
+
+        let compact_event = if significant_drop {
             Some(ProxyEvent::ContextCompact {
                 timestamp: Utc::now(),
                 previous_context: state.last_context_tokens,
-                new_context: input_tokens as u64,
+                new_context: current_context,
             })
         } else {
             None
         };
 
         // Update state for next check (only for non-Haiku)
-        if cache_read_tokens > 0 {
-            state.last_cached_tokens = cache_read_tokens as u64;
+        if cache > 0 {
+            state.last_cached_tokens = cache;
             state.last_context_tokens = current_context;
         } else if compact_event.is_some() {
             // Reset after compact
             state.last_cached_tokens = 0;
-            state.last_context_tokens = input_tokens as u64;
+            state.last_context_tokens = current_context;
         }
 
         compact_event

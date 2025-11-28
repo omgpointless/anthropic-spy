@@ -9,6 +9,32 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+/// Version info
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Feature flags for optional modules
+#[derive(Debug, Clone)]
+pub struct Features {
+    /// Storage module: write events to JSONL files
+    pub storage: bool,
+
+    /// Thinking panel: show Claude's extended thinking
+    pub thinking_panel: bool,
+
+    /// Stats tracking: token counts, costs, tool distribution
+    pub stats: bool,
+}
+
+impl Default for Features {
+    fn default() -> Self {
+        Self {
+            storage: true,
+            thinking_panel: true,
+            stats: true,
+        }
+    }
+}
+
 /// Application configuration
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -32,6 +58,17 @@ pub struct Config {
 
     /// Theme name: "auto", "dracula", "monokai", "nord", "gruvbox"
     pub theme: String,
+
+    /// Feature flags for optional modules
+    pub features: Features,
+}
+
+/// Feature flags as loaded from config file
+#[derive(Debug, Deserialize, Default)]
+struct FileFeatures {
+    storage: Option<bool>,
+    thinking_panel: Option<bool>,
+    stats: Option<bool>,
 }
 
 /// Config file structure (subset of Config that makes sense to persist)
@@ -42,6 +79,9 @@ struct FileConfig {
     api_url: Option<String>,
     log_dir: Option<String>,
     theme: Option<String>,
+
+    /// Optional [features] section
+    features: Option<FileFeatures>,
 }
 
 impl Config {
@@ -113,6 +153,14 @@ impl Config {
             .or(file.theme)
             .unwrap_or_else(|| "auto".to_string());
 
+        // Feature flags: file config only (env vars would be verbose)
+        let file_features = file.features.unwrap_or_default();
+        let features = Features {
+            storage: file_features.storage.unwrap_or(true),
+            thinking_panel: file_features.thinking_panel.unwrap_or(true),
+            stats: file_features.stats.unwrap_or(true),
+        };
+
         Self {
             bind_addr,
             api_url,
@@ -121,6 +169,7 @@ impl Config {
             demo_mode,
             context_limit,
             theme,
+            features,
         }
     }
 }
@@ -135,6 +184,7 @@ impl Default for Config {
             demo_mode: false,
             context_limit: 150_000,
             theme: "auto".to_string(),
+            features: Features::default(),
         }
     }
 }
