@@ -10,6 +10,7 @@ use super::modal::{Modal, ThemeSelectorState, THEME_LIST};
 use super::scroll::FocusablePanel;
 use crate::events::ProxyEvent;
 use crate::logging::{LogEntry, LogLevel};
+use crate::theme::Theme;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -111,8 +112,7 @@ fn render_events_content(f: &mut Frame, area: Rect, app: &App) {
 fn render_stats_view(f: &mut Frame, area: Rect, app: &App) {
     let stats = &app.stats;
 
-    // Split into top row (Models + Cache) and bottom row (Tools + Totals)
-    // Both rows use same 55/45 split so vertical dividers align
+    // Split into 2x2 grid - equal quadrants
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -120,12 +120,12 @@ fn render_stats_view(f: &mut Frame, area: Rect, app: &App) {
 
     let top_row = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(rows[0]);
 
     let bottom_row = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(55), Constraint::Percentage(45)])
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(rows[1]);
 
     // === Models Panel (top-left) ===
@@ -213,95 +213,33 @@ fn render_tokens_panel(f: &mut Frame, area: Rect, stats: &crate::events::Stats) 
             Style::default().fg(Color::DarkGray),
         )));
     } else {
-        // Calculate proportions (bar width = 16 chars max)
+        // Calculate proportions (bar width = 16 chars)
+        // Each bar shows its proportion independently
         let bar_width: usize = 16;
-        let cached_width = ((cached as f64 / total as f64) * bar_width as f64).round() as usize;
-        let input_width = ((input as f64 / total as f64) * bar_width as f64).round() as usize;
-        let output_width = bar_width.saturating_sub(cached_width + input_width);
 
-        // Cached tokens row (green)
-        let cached_pct = if total > 0 {
-            (cached as f64 / total as f64) * 100.0
-        } else {
-            0.0
-        };
-        lines.push(Line::from(vec![
-            Span::styled("  Cached ", Style::default().fg(Color::Green)),
-            Span::styled(
-                "█".repeat(cached_width.max(if cached > 0 { 1 } else { 0 })),
-                Style::default().fg(Color::Green),
-            ),
-            Span::styled(
-                "░".repeat(bar_width.saturating_sub(cached_width)),
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled(
-                format!(" {:>7} ", format_compact_number(cached)),
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:>5.1}%", cached_pct),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]));
+        // Helper to render a token bar with consistent style
+        let render_bar = |label: &str, value: u64, color: Color| -> Line {
+            let pct = (value as f64 / total as f64) * 100.0;
+            // Cap at bar_width - 1 to always show some background
+            let filled = ((pct / 100.0) * bar_width as f64).round() as usize;
+            let filled = if value > 0 { filled.max(1).min(bar_width - 1) } else { 0 };
+            let empty = bar_width - filled;
 
-        // Input tokens row (cyan)
-        let input_pct = if total > 0 {
-            (input as f64 / total as f64) * 100.0
-        } else {
-            0.0
+            Line::from(vec![
+                Span::styled(format!("  {:7} ", label), Style::default().fg(color)),
+                Span::styled("█".repeat(filled), Style::default().fg(color)),
+                Span::styled("░".repeat(empty), Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!(" {:>7} ", format_compact_number(value)),
+                    Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(format!("{:>5.1}%", pct), Style::default().fg(Color::DarkGray)),
+            ])
         };
-        lines.push(Line::from(vec![
-            Span::styled("  Input  ", Style::default().fg(Color::Cyan)),
-            Span::styled(
-                "█".repeat(input_width.max(if input > 0 { 1 } else { 0 })),
-                Style::default().fg(Color::Cyan),
-            ),
-            Span::styled(
-                "░".repeat(bar_width.saturating_sub(input_width)),
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled(
-                format!(" {:>7} ", format_compact_number(input)),
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:>5.1}%", input_pct),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]));
 
-        // Output tokens row (magenta)
-        let output_pct = if total > 0 {
-            (output as f64 / total as f64) * 100.0
-        } else {
-            0.0
-        };
-        lines.push(Line::from(vec![
-            Span::styled("  Output ", Style::default().fg(Color::Magenta)),
-            Span::styled(
-                "█".repeat(output_width.max(if output > 0 { 1 } else { 0 })),
-                Style::default().fg(Color::Magenta),
-            ),
-            Span::styled(
-                "░".repeat(bar_width.saturating_sub(output_width)),
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled(
-                format!(" {:>7} ", format_compact_number(output)),
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("{:>5.1}%", output_pct),
-                Style::default().fg(Color::DarkGray),
-            ),
-        ]));
+        lines.push(render_bar("Cached", cached, Color::Green));
+        lines.push(render_bar("Input", input, Color::Cyan));
+        lines.push(render_bar("Output", output, Color::Magenta));
 
         // Blank line
         lines.push(Line::from(""));
@@ -1352,7 +1290,7 @@ pub fn render_logs_panel(f: &mut Frame, area: Rect, app: &App) {
         .iter()
         .map(|entry| {
             let formatted = format_log_entry(entry);
-            let style = log_level_style(&entry.level);
+            let style = log_level_style(&entry.level, &app.theme);
             ListItem::new(formatted).style(style)
         })
         .collect();
@@ -1379,14 +1317,14 @@ fn format_log_entry(entry: &LogEntry) -> String {
     )
 }
 
-/// Get color style for log level
-fn log_level_style(level: &LogLevel) -> Style {
+/// Get color style for log level (uses theme colors for consistency)
+fn log_level_style(level: &LogLevel, theme: &Theme) -> Style {
     match level {
-        LogLevel::Error => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        LogLevel::Warn => Style::default().fg(Color::Yellow),
-        LogLevel::Info => Style::default().fg(Color::Blue),
-        LogLevel::Debug => Style::default().fg(Color::Gray),
-        LogLevel::Trace => Style::default().fg(Color::DarkGray),
+        LogLevel::Error => Style::default().fg(theme.error).add_modifier(Modifier::BOLD),
+        LogLevel::Warn => Style::default().fg(theme.rate_limit),
+        LogLevel::Info => Style::default().fg(theme.api_usage),
+        LogLevel::Debug => Style::default().fg(theme.headers),
+        LogLevel::Trace => Style::default().fg(theme.headers),
     }
 }
 

@@ -126,6 +126,9 @@ fn generate_session_id() -> String {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Ensure config template exists (helps users discover options)
+    Config::ensure_config_exists();
+
     // Load configuration first to determine TUI vs headless mode
     let config = Config::from_env();
 

@@ -56,7 +56,7 @@ pub struct Config {
     /// Context window limit for the gauge (empirically ~150K triggers compact)
     pub context_limit: u64,
 
-    /// Theme name: "auto", "dracula", "monokai", "nord", "gruvbox"
+    /// Theme name: "basic", "terminal", "dracula", "monokai", "nord", "gruvbox"
     pub theme: String,
 
     /// Feature flags for optional modules
@@ -86,8 +86,54 @@ struct FileConfig {
 
 impl Config {
     /// Get the config file path: ~/.config/anthropic-spy/config.toml
+    /// Uses Unix-style ~/.config on all platforms for consistency
     pub fn config_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|p| p.join("anthropic-spy").join("config.toml"))
+        dirs::home_dir().map(|p| p.join(".config").join("anthropic-spy").join("config.toml"))
+    }
+
+    /// Create config template if it doesn't exist
+    /// Called during startup to help users discover configuration options
+    pub fn ensure_config_exists() {
+        let Some(path) = Self::config_path() else {
+            return;
+        };
+
+        // Don't overwrite existing config
+        if path.exists() {
+            return;
+        }
+
+        // Create parent directory
+        if let Some(parent) = path.parent() {
+            if std::fs::create_dir_all(parent).is_err() {
+                return; // Silently fail - config is optional
+            }
+        }
+
+        let template = r#"# anthropic-spy configuration
+# Uncomment and modify options as needed
+
+# Theme: basic, terminal, dracula, monokai, monokai-pro-gogh, nord, gruvbox
+# theme = "basic"
+
+# Context window limit for the gauge (default: 150000)
+# context_limit = 150000
+
+# Proxy bind address (default: 127.0.0.1:8080)
+# bind_addr = "127.0.0.1:8080"
+
+# Log directory for session files (default: ./logs)
+# log_dir = "./logs"
+
+# Feature flags
+# [features]
+# storage = true         # Write events to JSONL files
+# thinking_panel = true  # Show Claude's extended thinking
+# stats = true           # Track token counts and costs
+"#;
+
+        // Write template (ignore errors - config is optional)
+        let _ = std::fs::write(&path, template);
     }
 
     /// Load file config if it exists
@@ -147,11 +193,11 @@ impl Config {
             .or(file.context_limit)
             .unwrap_or(150_000);
 
-        // Theme: env > file > default ("auto" uses terminal palette)
+        // Theme: env > file > default ("basic" for consistent RGB colors)
         let theme = std::env::var("ANTHROPIC_SPY_THEME")
             .ok()
             .or(file.theme)
-            .unwrap_or_else(|| "auto".to_string());
+            .unwrap_or_else(|| "basic".to_string());
 
         // Feature flags: file config only (env vars would be verbose)
         let file_features = file.features.unwrap_or_default();
@@ -183,7 +229,7 @@ impl Default for Config {
             enable_tui: true,
             demo_mode: false,
             context_limit: 150_000,
-            theme: "auto".to_string(),
+            theme: "basic".to_string(),
             features: Features::default(),
         }
     }

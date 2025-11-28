@@ -1,7 +1,8 @@
 // Theme support for the TUI
 //
 // Provides color palettes that can be configured via config file.
-// "auto" uses terminal's ANSI palette, named themes use true color (RGB).
+// "basic" is the default with full RGB colors for consistent appearance.
+// "terminal" uses ANSI palette to adapt to your terminal's color scheme.
 
 use ratatui::style::Color;
 
