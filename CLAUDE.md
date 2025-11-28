@@ -455,3 +455,4 @@ Tool calls:   29 (Read-heavy)
 - **Architecture Deep Dive:** See `.claude/ARCHITECTURE.md`
 - **Project Status:** See `.claude/PROJECT_STATUS.md`
 - **Messaging Guidelines:** See `.claude/TONE_GUIDE.md`
+- While the codebase may or may not signify it, we aim to develop from this point on in a modular fashion, allowing flexibility and isolation of responibility. We recognize the fact that app historically has smelt and we tend to regress to it smelling again. Long term perspective this is not a maintainable approach for what this project has become

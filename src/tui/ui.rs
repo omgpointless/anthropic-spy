@@ -6,6 +6,7 @@
 
 use super::app::{App, StreamingState, View};
 use super::layout::Breakpoint;
+use super::modal::{Modal, ThemeSelectorState, THEME_LIST};
 use super::scroll::FocusablePanel;
 use crate::events::ProxyEvent;
 use crate::logging::{LogEntry, LogLevel};
@@ -14,7 +15,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Gauge, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation,
+        Block, Borders, Clear, Gauge, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation,
         ScrollbarState, Wrap,
     },
     Frame,
@@ -57,6 +58,11 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     // Render status bar
     render_status(f, chunks[4], app);
+
+    // Render modal overlay (on top of everything)
+    if let Some(ref modal) = app.modal {
+        render_modal(f, modal, app);
+    }
 }
 
 /// Render the Events view content (original main view)
@@ -1382,4 +1388,60 @@ fn log_level_style(level: &LogLevel) -> Style {
         LogLevel::Debug => Style::default().fg(Color::Gray),
         LogLevel::Trace => Style::default().fg(Color::DarkGray),
     }
+}
+
+// ============================================================================
+// Modal rendering
+// ============================================================================
+
+/// Render a modal dialog as a centered overlay
+fn render_modal(f: &mut Frame, modal: &Modal, app: &App) {
+    match modal {
+        Modal::ThemeSelector(state) => render_theme_selector(f, state, app),
+    }
+}
+
+/// Calculate centered rect for modal dialog
+fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let x = area.x + (area.width.saturating_sub(width)) / 2;
+    let y = area.y + (area.height.saturating_sub(height)) / 2;
+    Rect::new(x, y, width.min(area.width), height.min(area.height))
+}
+
+/// Render the theme selector modal
+fn render_theme_selector(f: &mut Frame, state: &ThemeSelectorState, app: &App) {
+    // Calculate modal size: width for theme names + padding, height for list + header/footer
+    let width = 40;
+    let height = (THEME_LIST.len() + 4) as u16; // +4 for borders, title, help text
+
+    let area = centered_rect(width, height, f.area());
+
+    // Clear the area behind the modal
+    f.render_widget(Clear, area);
+
+    // Build list items with selection highlight
+    let items: Vec<ListItem> = THEME_LIST
+        .iter()
+        .enumerate()
+        .map(|(i, &name)| {
+            let style = if i == state.selected {
+                Style::default()
+                    .fg(app.theme.highlight)
+                    .add_modifier(Modifier::BOLD | Modifier::REVERSED)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            ListItem::new(format!("  {}  ", name)).style(style)
+        })
+        .collect();
+
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(app.theme.highlight))
+            .title(" Select Theme ")
+            .title_bottom(Line::from(" ↑↓ Navigate  Enter Apply  Esc Cancel ").centered()),
+    );
+
+    f.render_widget(list, area);
 }

@@ -4,6 +4,7 @@
 // of events, selected item, statistics, and UI state.
 
 use super::input::InputHandler;
+use super::modal::Modal;
 use super::scroll::{FocusablePanel, PanelStates};
 use super::streaming::StreamingStateMachine;
 use crate::events::{ProxyEvent, Stats};
@@ -88,6 +89,9 @@ pub struct App {
     /// Shared buffer for real-time streaming thinking content
     /// Proxy writes to this, TUI reads from it each frame
     pub streaming_thinking: Option<StreamingThinking>,
+
+    /// Active modal dialog (captures input when Some)
+    pub modal: Option<Modal>,
 }
 
 impl App {
@@ -114,6 +118,7 @@ impl App {
             streaming_sm: StreamingStateMachine::new(),
             animation_frame: 0,
             streaming_thinking: None,
+            modal: None,
         }
     }
 

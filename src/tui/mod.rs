@@ -9,6 +9,7 @@
 pub mod app;
 pub mod input;
 pub mod layout;
+pub mod modal;
 pub mod scroll;
 pub mod streaming;
 pub mod ui;
@@ -18,6 +19,7 @@ use crate::logging::LogBuffer;
 use crate::StreamingThinking;
 use anyhow::{Context, Result};
 use app::{App, View};
+use modal::{Modal, ModalAction};
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
@@ -135,6 +137,29 @@ async fn run_event_loop(
 fn handle_key_event(app: &mut App, key_event: KeyEvent) {
     let key = key_event.code;
 
+    // Modal captures all input when active
+    if let Some(ref mut modal) = app.modal {
+        if key_event.kind == KeyEventKind::Press {
+            match modal.handle_input(key) {
+                ModalAction::None => {}
+                ModalAction::Cancel(original) => {
+                    // Restore original theme and close
+                    app.theme = crate::theme::Theme::by_name(&original);
+                    app.modal = None;
+                }
+                ModalAction::Apply => {
+                    // Theme already applied via Preview, just close
+                    app.modal = None;
+                }
+                ModalAction::Preview(theme) => {
+                    // Live preview - apply theme immediately
+                    app.theme = theme;
+                }
+            }
+        }
+        return; // Modal absorbs all input
+    }
+
     match key_event.kind {
         KeyEventKind::Press => {
             // Action keys - use time-based debounce (no release events needed)
@@ -142,6 +167,13 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) {
                 KeyCode::Char('q') | KeyCode::Char('Q') => {
                     if !app.should_debounce_action() {
                         app.should_quit = true;
+                    }
+                    return;
+                }
+                // Theme selector
+                KeyCode::Char('t') | KeyCode::Char('T') => {
+                    if !app.should_debounce_action() {
+                        app.modal = Some(Modal::theme_selector(&app.theme.name));
                     }
                     return;
                 }
