@@ -5,6 +5,7 @@
 
 use super::input::InputHandler;
 use super::modal::Modal;
+use super::preset::Preset;
 use super::scroll::{FocusablePanel, PanelStates};
 use super::streaming::StreamingStateMachine;
 use crate::events::{ProxyEvent, Stats};
@@ -92,6 +93,9 @@ pub struct App {
 
     /// Active modal dialog (captures input when Some)
     pub modal: Option<Modal>,
+
+    /// Layout preset (controls panel arrangement)
+    pub preset: Preset,
 }
 
 impl App {
@@ -119,6 +123,7 @@ impl App {
             animation_frame: 0,
             streaming_thinking: None,
             modal: None,
+            preset: Preset::classic(),
         }
     }
 
@@ -352,11 +357,93 @@ impl App {
             return;
         }
 
+        // Log milestones to system log panel
+        self.check_milestones(&event);
+
         self.events.push(event);
 
         // Auto-scroll to bottom when new events arrive
         if self.selected == self.events.len().saturating_sub(2) {
             self.selected = self.events.len().saturating_sub(1);
+        }
+    }
+
+    /// Check and log milestone events to the system log panel
+    /// This adds personality and useful info as events flow through
+    fn check_milestones(&self, event: &ProxyEvent) {
+        // First request - connection established!
+        if self.stats.total_requests == 1 && matches!(event, ProxyEvent::Request { .. }) {
+            tracing::info!("🎯 First contact! Claude Code connected.");
+        }
+
+        // First tool call
+        if self.stats.total_tool_calls == 1 && matches!(event, ProxyEvent::ToolCall { .. }) {
+            tracing::info!("🔧 First tool call intercepted.");
+        }
+
+        // Tool call milestones (10, 25, 50, 100, ...)
+        if matches!(event, ProxyEvent::ToolCall { .. }) {
+            match self.stats.total_tool_calls {
+                10 => tracing::info!("📊 Milestone: 10 tool calls"),
+                25 => tracing::info!("📊 Milestone: 25 tool calls"),
+                50 => tracing::info!("📊 Milestone: 50 tool calls"),
+                100 => tracing::info!("🎉 Milestone: 100 tool calls!"),
+                250 => tracing::info!("🔥 Milestone: 250 tool calls!"),
+                500 => tracing::info!("🚀 Milestone: 500 tool calls!"),
+                _ => {}
+            }
+        }
+
+        // First thinking block - extended thinking active
+        if self.stats.thinking_blocks == 1 && matches!(event, ProxyEvent::Thinking { .. }) {
+            tracing::info!("💭 Extended thinking detected.");
+        }
+
+        // Model detection and cache tips on ApiUsage
+        if let ProxyEvent::ApiUsage { model, .. } = event {
+            // First API usage - show which model is active
+            if self.stats.model_calls.is_empty()
+                || self.stats.model_calls.values().sum::<u32>() == 1
+            {
+                let model_short = if model.contains("opus") {
+                    "Opus"
+                } else if model.contains("sonnet") {
+                    "Sonnet"
+                } else if model.contains("haiku") {
+                    "Haiku"
+                } else {
+                    model.as_str()
+                };
+                tracing::info!("🤖 Model detected: {}", model_short);
+            }
+
+            // Cache efficiency tips (after some data)
+            let cache_rate = self.stats.cache_hit_rate();
+            if self.stats.total_requests == 5 {
+                if cache_rate >= 90.0 {
+                    tracing::info!("✨ Cache efficiency: {:.0}% - excellent!", cache_rate);
+                } else if cache_rate < 50.0 && self.stats.total_cache_read_tokens > 0 {
+                    tracing::info!("💡 Cache efficiency: {:.0}% - could improve", cache_rate);
+                }
+            }
+        }
+
+        // Context compaction detected
+        if matches!(event, ProxyEvent::ContextCompact { .. }) {
+            tracing::info!("📦 Context compaction triggered.");
+        }
+
+        // Cost milestones
+        if let ProxyEvent::ApiUsage { .. } = event {
+            let cost = self.stats.total_cost();
+            // Round to nearest cent for comparison
+            let cost_cents = (cost * 100.0).round() as u32;
+            match cost_cents {
+                100 => tracing::info!("💰 Cost milestone: $1.00"),
+                500 => tracing::info!("💰 Cost milestone: $5.00"),
+                1000 => tracing::info!("💰 Cost milestone: $10.00"),
+                _ => {}
+            }
         }
     }
 

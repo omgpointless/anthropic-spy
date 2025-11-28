@@ -291,20 +291,10 @@ async fn proxy_handler(
         format!("{}?{}", forward_url, query)
     };
 
-    // INTERCEPTOR: Potentially modify request body for context warnings
-    // Only applies to POST /messages requests
-    let final_body = if is_messages_endpoint && method == "POST" {
-        if let Some(modified) =
-            interceptor::maybe_inject_context_warning(&body_bytes, &state.context_state)
-        {
-            tracing::info!("Injected context warning annotation");
-            modified
-        } else {
-            body_bytes.to_vec()
-        }
-    } else {
-        body_bytes.to_vec()
-    };
+    // INTERCEPTOR: Request-side injection disabled - using SSE response injection instead
+    // SSE injection is more reliable (no prompt engineering) and appears at end of response
+    // See handle_streaming_response() for the active injection point
+    let final_body = body_bytes.to_vec();
 
     // Build the forwarded request
     // With reqwest 0.12, Method types align with axum (both use http 1.0 crate)
@@ -414,6 +404,12 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
         let mut total_bytes = 0usize;
         // Buffer for incomplete SSE lines across chunks
         let mut line_buffer = String::new();
+        // Track content block index for potential injection
+        let mut max_block_index: u32 = 0;
+        // Track if we've injected this response (only inject once)
+        let mut injected = false;
+        // Track model for injection filtering (skip Haiku utility calls)
+        let mut response_model = String::new();
 
         // Stream chunks to client while accumulating
         while let Some(chunk_result) = byte_stream.next().await {
@@ -435,6 +431,18 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                                 if let Some(tool_info) = extract_tool_use_from_sse_line(line) {
                                     parser.register_pending_tool(tool_info.0, tool_info.1).await;
                                 }
+                                // Track content block index for injection
+                                if let Some(idx) = extract_content_block_index(line) {
+                                    if idx >= max_block_index {
+                                        max_block_index = idx + 1;
+                                    }
+                                }
+                                // Extract model from message_start (for injection filtering)
+                                if response_model.is_empty() {
+                                    if let Some(model) = extract_model_from_sse_line(line) {
+                                        response_model = model;
+                                    }
+                                }
                                 // Emit ThinkingStarted immediately for real-time feedback
                                 if is_thinking_block_start(line) {
                                     // Clear buffer for new thinking block
@@ -454,6 +462,50 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                                     }
                                 }
                                 line_buffer = line_buffer[newline_pos + 1..].to_string();
+                            }
+                        }
+
+                        // Check if this chunk contains message_delta - inject before forwarding
+                        // Only inject on end_turn responses (not tool_use)
+                        if !injected {
+                            if let Ok(chunk_str) = std::str::from_utf8(&chunk) {
+                                if chunk_str.contains("message_delta") {
+                                    // Parse stop_reason to decide if we should inject
+                                    let is_end_turn = chunk_str.contains("\"stop_reason\":\"end_turn\"")
+                                        || chunk_str.contains("\"stop_reason\": \"end_turn\"");
+                                    let is_tool_use = chunk_str.contains("\"stop_reason\":\"tool_use\"")
+                                        || chunk_str.contains("\"stop_reason\": \"tool_use\"");
+
+                                    // Skip injection on Haiku utility calls (topic gen, etc.)
+                                    let is_haiku = response_model.to_lowercase().contains("haiku");
+
+                                    if is_tool_use {
+                                        tracing::info!("SSE: tool_use response, skipping injection");
+                                    } else if is_haiku {
+                                        tracing::info!("SSE: Haiku response ({}), skipping injection", response_model);
+                                    } else if is_end_turn {
+                                        // Safe to inject on main conversation response
+                                        if let Some(injection) =
+                                            interceptor::maybe_generate_sse_injection(
+                                                &context_state,
+                                                max_block_index,
+                                            )
+                                        {
+                                            tracing::info!(
+                                                "SSE: injecting context warning at block index {} (model: {})",
+                                                max_block_index,
+                                                response_model
+                                            );
+                                            let _ = tx.send(Ok(Bytes::from(injection))).await;
+                                            injected = true;
+                                        } else {
+                                            tracing::info!(
+                                                "SSE: end_turn (model: {}), threshold not met",
+                                                response_model
+                                            );
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -816,6 +868,49 @@ fn extract_thinking_delta(line: &str) -> Option<String> {
 
     // Extract the thinking text
     delta.get("thinking")?.as_str().map(String::from)
+}
+
+/// Extract content block index from SSE content_block_start event
+/// Used to track the highest block index for annotation injection
+fn extract_content_block_index(line: &str) -> Option<u32> {
+    let json_str = line.strip_prefix("data:")?.trim();
+    if json_str.is_empty() || json_str == "[DONE]" {
+        return None;
+    }
+
+    let data: serde_json::Value = serde_json::from_str(json_str).ok()?;
+
+    // Check for content_block_start event
+    let event_type = data.get("type")?.as_str()?;
+    if event_type != "content_block_start" {
+        return None;
+    }
+
+    // Extract the index
+    data.get("index")?.as_u64().map(|i| i as u32)
+}
+
+/// Extract model name from SSE message_start event
+/// Returns Some(model_string) if this is a message_start with a model field
+fn extract_model_from_sse_line(line: &str) -> Option<String> {
+    let json_str = line.strip_prefix("data:")?.trim();
+    if json_str.is_empty() || json_str == "[DONE]" {
+        return None;
+    }
+
+    let data: serde_json::Value = serde_json::from_str(json_str).ok()?;
+
+    // Check for message_start event
+    let event_type = data.get("type")?.as_str()?;
+    if event_type != "message_start" {
+        return None;
+    }
+
+    // Extract model from message_start.message.model
+    data.get("message")?
+        .get("model")?
+        .as_str()
+        .map(String::from)
 }
 
 /// Errors that can occur during proxying

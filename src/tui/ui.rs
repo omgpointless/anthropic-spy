@@ -7,6 +7,7 @@
 use super::app::{App, StreamingState, View};
 use super::layout::Breakpoint;
 use super::modal::{Modal, ThemeSelectorState, THEME_LIST};
+use super::preset::Panel;
 use super::scroll::FocusablePanel;
 use crate::events::ProxyEvent;
 use crate::logging::{LogEntry, LogLevel};
@@ -23,42 +24,57 @@ use ratatui::{
 };
 
 /// Main UI render function - called on every frame
-pub fn draw(f: &mut Frame, app: &App) {
-    // Split the terminal into five vertical sections:
-    // - Title bar (3 lines fixed)
-    // - Main content area (fills remaining space)
-    // - System logs (6 lines fixed)
-    // - Context bar (1 line - context window usage)
-    // - Status bar (3 lines fixed)
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3), // Title bar
-            Constraint::Min(10),   // Main content - takes remaining space
-            Constraint::Length(6), // System logs - fixed height
-            Constraint::Length(1), // Context bar
-            Constraint::Length(3), // Status bar
-        ])
-        .split(f.area());
+pub fn draw(f: &mut Frame, app: &mut App) {
+    // Build shell layout from preset
+    // Structure: [header panels...] [content slot] [footer panels...]
+    let shell = &app.preset.shell;
 
-    // Render title bar
-    render_title(f, chunks[0], app);
+    // Collect constraints: headers + content + footers
+    let mut constraints: Vec<Constraint> = Vec::new();
+    let mut panel_map: Vec<Option<Panel>> = Vec::new();
 
-    // Main content depends on active view
-    match app.view {
-        View::Events => render_events_content(f, chunks[1], app),
-        View::Stats => render_stats_view(f, chunks[1], app),
-        View::Help => render_help_view(f, chunks[1], app),
+    // Add header slots
+    for slot in &shell.header {
+        constraints.push(slot.size.to_constraint());
+        panel_map.push(Some(slot.panel));
     }
 
-    // Render system logs panel
-    render_logs_panel(f, chunks[2], app);
+    // Add content slot (fills remaining space)
+    constraints.push(Constraint::Min(10));
+    panel_map.push(None); // None = content slot
 
-    // Render context bar
-    render_context_bar(f, chunks[3], app);
+    // Add footer slots
+    for slot in &shell.footer {
+        constraints.push(slot.size.to_constraint());
+        panel_map.push(Some(slot.panel));
+    }
 
-    // Render status bar
-    render_status(f, chunks[4], app);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(f.area());
+
+    // Render each chunk based on panel type
+    let mut content_area: Option<Rect> = None;
+    for (i, panel) in panel_map.iter().enumerate() {
+        match panel {
+            Some(Panel::Title) => render_title(f, chunks[i], app),
+            Some(Panel::Logs) => render_logs_panel(f, chunks[i], app),
+            Some(Panel::ContextBar) => render_context_bar(f, chunks[i], app),
+            Some(Panel::Status) => render_status(f, chunks[i], app),
+            None => content_area = Some(chunks[i]), // Content slot
+            _ => {}                                 // Other panels not in shell
+        }
+    }
+
+    // Render view content in the content slot
+    if let Some(area) = content_area {
+        match app.view {
+            View::Events => render_events_content(f, area, app),
+            View::Stats => render_stats_view(f, area, app),
+            View::Help => render_help_view(f, area, app),
+        }
+    }
 
     // Render modal overlay (on top of everything)
     if let Some(ref modal) = app.modal {
@@ -67,7 +83,7 @@ pub fn draw(f: &mut Frame, app: &App) {
 }
 
 /// Render the Events view content (original main view)
-fn render_events_content(f: &mut Frame, area: Rect, app: &App) {
+fn render_events_content(f: &mut Frame, area: Rect, app: &mut App) {
     let has_thinking = app.has_thinking_content();
     let bp = Breakpoint::from_width(area.width);
 
@@ -477,7 +493,7 @@ fn render_help_view(f: &mut Frame, area: Rect, app: &App) {
 }
 
 /// Render the thinking panel showing Claude's reasoning
-fn render_thinking_panel(f: &mut Frame, area: Rect, app: &App) {
+fn render_thinking_panel(f: &mut Frame, area: Rect, app: &mut App) {
     // Get thinking content: streaming (real-time) or completed
     let thinking_content = app
         .current_thinking_content()
@@ -489,23 +505,36 @@ fn render_thinking_panel(f: &mut Frame, area: Rect, app: &App) {
     let text_lines = thinking_content.lines().count();
 
     // Estimate visual lines after wrapping (rough: chars / width)
-    // This is imprecise but good enough for scroll position
     let estimated_visual_lines = thinking_content
         .lines()
         .map(|line| (line.len() / width.max(1)).max(1))
         .sum::<usize>();
 
-    // Auto-follow: scroll to show bottom of content
-    // Using Paragraph::scroll which works on visual (wrapped) lines
-    let scroll_offset = estimated_visual_lines.saturating_sub(height);
+    // Update scroll state dimensions
+    app.panels
+        .thinking
+        .update_dimensions(estimated_visual_lines, height);
+
+    // Get scroll offset from state (respects auto-follow and user scrolling)
+    let scroll_offset = app.panels.thinking.offset();
+
+    // Build title with scroll indicator
+    let scroll_indicator = if !app.panels.thinking.auto_follow {
+        " [scroll]"
+    } else {
+        ""
+    };
 
     let title = if text_lines > height {
         format!(
-            " 💭 Thinking ({} lines, ~{} tok) ",
-            text_lines, app.stats.thinking_tokens
+            " 💭 Thinking ({} lines, ~{} tok){} ",
+            text_lines, app.stats.thinking_tokens, scroll_indicator
         )
     } else {
-        format!(" 💭 Thinking (~{} tok) ", app.stats.thinking_tokens)
+        format!(
+            " 💭 Thinking (~{} tok){} ",
+            app.stats.thinking_tokens, scroll_indicator
+        )
     };
 
     let focused = app.is_focused(FocusablePanel::Thinking);
@@ -519,11 +548,11 @@ fn render_thinking_panel(f: &mut Frame, area: Rect, app: &App) {
                 .title(title),
         )
         .wrap(Wrap { trim: false })
-        .scroll((scroll_offset as u16, 0)); // Scroll to bottom (auto-follow)
+        .scroll((scroll_offset as u16, 0));
 
     f.render_widget(paragraph, area);
 
-    // Render scrollbar if content overflows (shows auto-follow position)
+    // Render scrollbar if content overflows
     if estimated_visual_lines > height {
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(Some("↑"))
@@ -754,6 +783,9 @@ fn render_list_view(f: &mut Frame, area: Rect, app: &App) {
 
     let title = if app.events.is_empty() {
         " Events ".to_string()
+    } else if app.events.len() > height && app.selected < app.events.len().saturating_sub(1) {
+        // Show position when scrolled (not at bottom)
+        format!(" Events ({}/{}) ", app.selected + 1, app.events.len())
     } else {
         format!(" Events ({}) ", app.events.len())
     };
@@ -1289,13 +1321,24 @@ fn event_color_style(event: &ProxyEvent, theme: &crate::theme::Theme) -> Style {
 }
 
 /// Render system logs panel at the bottom of the screen
-pub fn render_logs_panel(f: &mut Frame, area: Rect, app: &App) {
-    // Get recent log entries from buffer
+pub fn render_logs_panel(f: &mut Frame, area: Rect, app: &mut App) {
     let height = area.height.saturating_sub(2) as usize; // Account for borders
-    let log_entries = app.log_buffer.get_recent(height);
+    let all_entries = app.log_buffer.get_all();
+    let total = all_entries.len();
+
+    // Update scroll state dimensions
+    app.panels.logs.update_dimensions(total, height);
+
+    // Get visible range based on scroll position
+    let (start, end) = app.panels.logs.visible_range();
+    let visible_entries: Vec<_> = all_entries
+        .into_iter()
+        .skip(start)
+        .take(end - start)
+        .collect();
 
     // Convert log entries to list items with color coding
-    let items: Vec<ListItem> = log_entries
+    let items: Vec<ListItem> = visible_entries
         .iter()
         .map(|entry| {
             let formatted = format_log_entry(entry);
@@ -1306,11 +1349,19 @@ pub fn render_logs_panel(f: &mut Frame, area: Rect, app: &App) {
 
     let focused = app.is_focused(FocusablePanel::Logs);
     let border_color = app.theme.panel_border(FocusablePanel::Logs, focused);
+
+    // Show scroll indicator if not at bottom
+    let title = if app.panels.logs.auto_follow {
+        " System Logs "
+    } else {
+        " System Logs [scroll] "
+    };
+
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border_color))
-            .title(" System Logs "),
+            .title(title),
     );
 
     f.render_widget(list, area);

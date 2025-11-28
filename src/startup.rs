@@ -125,17 +125,27 @@ fn print_module_status(module: &ModuleStatus) {
     );
 }
 
-/// Print a brief startup message for TUI mode (shown in logs)
-/// Full banner is printed to stdout before TUI takes over
+/// Print startup messages to TUI log panel
+/// This creates an engaging boot sequence that users see in the System Logs panel
 pub fn log_startup(config: &Config) {
-    tracing::info!("Anthropic Spy v{} starting", VERSION);
-    tracing::info!("Proxy: {}", config.bind_addr);
+    // ASCII art header (simple, fits the log format)
+    tracing::info!("═══════════════════════════════════");
+    tracing::info!("  🕵️  ANTHROPIC SPY v{}", VERSION);
+    tracing::info!("═══════════════════════════════════");
 
-    let enabled: Vec<_> = get_module_status(config)
-        .iter()
-        .filter(|m| m.enabled)
-        .map(|m| m.name)
-        .collect();
+    // Module loading with individual status
+    let modules = get_module_status(config);
+    for module in &modules {
+        let icon = if module.enabled { "✓" } else { "○" };
+        tracing::info!("  {} {} - {}", icon, module.name, module.description);
+    }
 
-    tracing::info!("Modules: {}", enabled.join(", "));
+    // Proxy ready message
+    tracing::info!("▸ Listening on {}", config.bind_addr);
+
+    if config.demo_mode {
+        tracing::info!("▸ Demo mode active (mock events)");
+    }
+
+    tracing::info!("Ready. Waiting for Claude Code...");
 }

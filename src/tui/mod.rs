@@ -10,6 +10,7 @@ pub mod app;
 pub mod input;
 pub mod layout;
 pub mod modal;
+pub mod preset;
 pub mod scroll;
 pub mod streaming;
 pub mod ui;

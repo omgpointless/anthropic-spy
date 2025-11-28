@@ -82,6 +82,51 @@ pub fn maybe_inject_context_warning(
     serde_json::to_vec(&request).ok()
 }
 
+/// Generate SSE events to inject a context warning annotation at end of response
+/// Returns None if no injection needed, Some(sse_bytes) if we should inject
+///
+/// The injection creates a new content block with the annotation text, formatted
+/// as valid SSE that Claude Code will render as a styled annotation box.
+pub fn maybe_generate_sse_injection(
+    context_state: &SharedContextState,
+    next_block_index: u32,
+) -> Option<Vec<u8>> {
+    // Lock context state and check if we should warn
+    let mut ctx = context_state.lock().ok()?;
+    let threshold = ctx.should_warn()?;
+
+    // We should warn - generate the SSE injection
+    let percent = threshold;
+    let current_k = ctx.current_tokens / 1000;
+    let limit_k = ctx.limit / 1000;
+
+    // Mark that we warned at this threshold
+    ctx.mark_warned(threshold);
+
+    // Build the annotation text
+    let annotation = format!(
+        "\n\n`★ anthropic-spy (context) ─────────────────────────────`\n\
+         Context at {}% ({}K/{}K). Consider `/compact` to free space.\n\
+         `─────────────────────────────────────────────────────────`",
+        percent, current_k, limit_k
+    );
+
+    // Generate SSE events for a new content block
+    // IMPORTANT: SSE format requires "data:" at column 0, no leading whitespace
+    let sse = format!(
+        "event: content_block_start\ndata: {{\"type\":\"content_block_start\",\"index\":{idx},\"content_block\":{{\"type\":\"text\",\"text\":\"\"}}}}\n\nevent: content_block_delta\ndata: {{\"type\":\"content_block_delta\",\"index\":{idx},\"delta\":{{\"type\":\"text_delta\",\"text\":{text}}}}}\n\nevent: content_block_stop\ndata: {{\"type\":\"content_block_stop\",\"index\":{idx}}}\n\n",
+        idx = next_block_index,
+        text = serde_json::to_string(&annotation).unwrap_or_default()
+    );
+
+    tracing::info!(
+        "Context warning: {}% ({}K/{}K) → injecting at index {}",
+        percent, current_k, limit_k, next_block_index
+    );
+
+    Some(sse.into_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
