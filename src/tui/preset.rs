@@ -213,15 +213,13 @@ impl Preset {
             events_view: ViewLayout {
                 layout: Layout::horizontal(vec![
                     LayoutSlot::new(Panel::Events, SizeConstraint::Percent(65)),
+                    // Thinking always visible - responsive overrides adjust size by breakpoint
                     LayoutSlot::new(Panel::Thinking, SizeConstraint::Percent(35)).with_responsive(
-                        ResponsiveRule {
-                            min_breakpoint: Some(Breakpoint::Normal),
-                            overrides: vec![
-                                (Breakpoint::UltraWide, SizeConstraint::Percent(30)),
-                                (Breakpoint::Wide, SizeConstraint::Percent(35)),
-                                (Breakpoint::Normal, SizeConstraint::Percent(40)),
-                            ],
-                        },
+                        ResponsiveRule::with_overrides(vec![
+                            (Breakpoint::UltraWide, SizeConstraint::Percent(30)),
+                            (Breakpoint::Wide, SizeConstraint::Percent(35)),
+                            (Breakpoint::Normal, SizeConstraint::Percent(40)),
+                        ]),
                     ),
                 ]),
             },

@@ -7,7 +7,7 @@
 use super::app::{App, StreamingState, View};
 use super::layout::Breakpoint;
 use super::modal::{Modal, ThemeSelectorState, THEME_LIST};
-use super::preset::Panel;
+use super::preset::{LayoutDirection, Panel};
 use super::scroll::FocusablePanel;
 use crate::events::ProxyEvent;
 use crate::logging::{LogEntry, LogLevel};
@@ -84,42 +84,36 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
 /// Render the Events view content (original main view)
 fn render_events_content(f: &mut Frame, area: Rect, app: &mut App) {
-    let has_thinking = app.has_thinking_content();
     let bp = Breakpoint::from_width(area.width);
 
-    // Only show thinking panel side-by-side if we have room
-    let show_thinking_panel = has_thinking && bp.at_least(Breakpoint::Normal);
+    // Get layout from preset
+    let resolved = app.preset.events_view.layout.resolve(bp);
+    let direction = match app.preset.events_view.layout.direction {
+        LayoutDirection::Horizontal => Direction::Horizontal,
+        LayoutDirection::Vertical => Direction::Vertical,
+    };
 
-    if show_thinking_panel {
-        // Split main area: Events | Thinking (responsive widths)
-        let thinking_pct = match bp {
-            Breakpoint::UltraWide => 30,
-            Breakpoint::Wide => 35,
-            _ => 40, // Normal
-        };
-        let main_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(100 - thinking_pct),
-                Constraint::Percentage(thinking_pct),
-            ])
-            .split(area);
+    // Build constraints from resolved layout
+    let constraints: Vec<Constraint> = resolved.iter().map(|(_, c)| *c).collect();
 
-        // Render events on the left
-        if app.show_detail {
-            render_split_view(f, main_chunks[0], app);
-        } else {
-            render_list_view(f, main_chunks[0], app);
-        }
+    // Split area based on preset layout
+    let chunks = Layout::default()
+        .direction(direction)
+        .constraints(constraints)
+        .split(area);
 
-        // Render thinking panel on the right
-        render_thinking_panel(f, main_chunks[1], app);
-    } else {
-        // No thinking panel (either no thinking, or too narrow)
-        if app.show_detail {
-            render_split_view(f, area, app);
-        } else {
-            render_list_view(f, area, app);
+    // Render each panel by its position in the preset
+    for (i, (panel, _)) in resolved.iter().enumerate() {
+        match panel {
+            Panel::Events => {
+                if app.show_detail {
+                    render_split_view(f, chunks[i], app);
+                } else {
+                    render_list_view(f, chunks[i], app);
+                }
+            }
+            Panel::Thinking => render_thinking_panel(f, chunks[i], app),
+            _ => {} // Other panels not used in events_view
         }
     }
 }

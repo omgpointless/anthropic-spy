@@ -471,18 +471,25 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                             if let Ok(chunk_str) = std::str::from_utf8(&chunk) {
                                 if chunk_str.contains("message_delta") {
                                     // Parse stop_reason to decide if we should inject
-                                    let is_end_turn = chunk_str.contains("\"stop_reason\":\"end_turn\"")
+                                    let is_end_turn = chunk_str
+                                        .contains("\"stop_reason\":\"end_turn\"")
                                         || chunk_str.contains("\"stop_reason\": \"end_turn\"");
-                                    let is_tool_use = chunk_str.contains("\"stop_reason\":\"tool_use\"")
+                                    let is_tool_use = chunk_str
+                                        .contains("\"stop_reason\":\"tool_use\"")
                                         || chunk_str.contains("\"stop_reason\": \"tool_use\"");
 
                                     // Skip injection on Haiku utility calls (topic gen, etc.)
                                     let is_haiku = response_model.to_lowercase().contains("haiku");
 
                                     if is_tool_use {
-                                        tracing::debug!("SSE: tool_use response, skipping injection");
+                                        tracing::debug!(
+                                            "SSE: tool_use response, skipping injection"
+                                        );
                                     } else if is_haiku {
-                                        tracing::debug!("SSE: Haiku response ({}), skipping injection", response_model);
+                                        tracing::debug!(
+                                            "SSE: Haiku response ({}), skipping injection",
+                                            response_model
+                                        );
                                     } else if is_end_turn {
                                         // Safe to inject on main conversation response
                                         if let Some(injection) =

@@ -105,8 +105,14 @@ pub fn maybe_generate_sse_injection(
 
     // Tiered messaging - informative at low thresholds, actionable at high
     let message = match percent {
-        95.. => format!("Context at {}% ({}K/{}K). `/compact` recommended.", percent, current_k, limit_k),
-        85..=94 => format!("Context at {}% ({}K/{}K). Consider `/compact` soon.", percent, current_k, limit_k),
+        95.. => format!(
+            "Context at {}% ({}K/{}K). `/compact` recommended.",
+            percent, current_k, limit_k
+        ),
+        85..=94 => format!(
+            "Context at {}% ({}K/{}K). Consider `/compact` soon.",
+            percent, current_k, limit_k
+        ),
         _ => format!("Context at {}% ({}K/{}K).", percent, current_k, limit_k),
     };
 
@@ -128,7 +134,10 @@ pub fn maybe_generate_sse_injection(
 
     tracing::info!(
         "Context: {}% ({}K/{}K) #{}",
-        percent, current_k, limit_k, next_block_index
+        percent,
+        current_k,
+        limit_k,
+        next_block_index
     );
 
     Some(sse.into_bytes())

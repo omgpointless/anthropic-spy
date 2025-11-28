@@ -158,20 +158,6 @@ impl App {
         self.stats.current_thinking.clone()
     }
 
-    /// Check if there's any thinking content to display
-    pub fn has_thinking_content(&self) -> bool {
-        // Check streaming buffer first
-        if let Some(ref streaming) = self.streaming_thinking {
-            if let Ok(guard) = streaming.lock() {
-                if !guard.is_empty() {
-                    return true;
-                }
-            }
-        }
-        // Fall back to completed thinking
-        self.stats.current_thinking.is_some()
-    }
-
     /// Set the active view
     pub fn set_view(&mut self, view: View) {
         self.view = view;

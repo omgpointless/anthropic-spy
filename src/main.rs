@@ -71,8 +71,7 @@ impl ContextState {
     pub fn should_warn(&self) -> Option<u8> {
         let percent = self.usage_percent();
 
-        // Determine current threshold bucket
-        // TODO: 20% is for debugging, restore to 80% for production
+        // Determine current threshold bucket (warn when context is getting full)
         let threshold = if percent >= 95.0 {
             95
         } else if percent >= 90.0 {
@@ -81,10 +80,6 @@ impl ContextState {
             85
         } else if percent >= 80.0 {
             80
-        } else if percent >= 50.0 {
-            50
-        } else if percent >= 20.0 {
-            20
         } else {
             return None; // Below warning threshold
         };
