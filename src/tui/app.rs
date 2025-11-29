@@ -103,7 +103,6 @@ pub struct App {
     // Core Data
     // The primary data this application manages
     // ─────────────────────────────────────────────────────────────────────────
-
     /// All proxy events received this session (tool calls, responses, etc.)
     pub events: Vec<ProxyEvent>,
 
@@ -120,7 +119,6 @@ pub struct App {
     // Navigation & Selection
     // Where the user is in the UI and what they're looking at
     // ─────────────────────────────────────────────────────────────────────────
-
     /// Active view (Events, Stats, Settings)
     pub view: View,
 
@@ -140,7 +138,6 @@ pub struct App {
     // Appearance & Animation
     // Visual presentation: theme, layout, streaming indicators
     // ─────────────────────────────────────────────────────────────────────────
-
     /// Color theme for the UI
     pub theme: Theme,
 
@@ -157,7 +154,6 @@ pub struct App {
     // Input Handling
     // Keyboard event processing and debouncing
     // ─────────────────────────────────────────────────────────────────────────
-
     /// Input handler (tracks pressed keys, prevents double-triggers)
     input_handler: InputHandler,
 
@@ -168,7 +164,6 @@ pub struct App {
     // Delegated Subsystems
     // Complex state that's managed by dedicated structs
     // ─────────────────────────────────────────────────────────────────────────
-
     /// Scroll state for all panels (events, detail, thinking, logs)
     pub panels: PanelStates,
 
@@ -185,7 +180,6 @@ pub struct App {
     // Lifecycle
     // Application lifecycle state
     // ─────────────────────────────────────────────────────────────────────────
-
     /// When the app started (for uptime display)
     pub start_time: Instant,
 

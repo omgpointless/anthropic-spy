@@ -25,8 +25,8 @@ use ratatui::{
     Frame,
 };
 
-// Import shared formatters from ui.rs
-use super::super::ui::format_number;
+// Import shared formatters from components
+use super::super::components::format_number;
 
 /// Main render function for the Events view
 pub fn render(f: &mut Frame, area: Rect, app: &mut App) {

@@ -15,8 +15,8 @@ use ratatui::{
     Frame,
 };
 
-// Import shared formatters from ui.rs (temporary until Phase 2)
-use super::super::ui::{format_compact_number, format_number};
+// Import shared formatters from components
+use super::super::components::{format_compact_number, format_number};
 
 /// Main render function for the Stats view
 pub fn render(f: &mut Frame, area: Rect, app: &crate::tui::app::App) {
