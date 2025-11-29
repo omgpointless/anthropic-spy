@@ -7,6 +7,7 @@
 // - Receiving proxy events and updating the display
 
 pub mod app;
+pub mod components;
 pub mod input;
 pub mod layout;
 pub mod markdown;
@@ -15,6 +16,7 @@ pub mod preset;
 pub mod scroll;
 pub mod streaming;
 pub mod ui;
+pub mod views;
 
 use crate::events::ProxyEvent;
 use crate::logging::LogBuffer;
@@ -103,7 +105,7 @@ async fn run_event_loop(
     loop {
         // Draw the UI
         terminal
-            .draw(|f| ui::draw(f, app))
+            .draw(|f| views::draw(f, app))
             .context("Failed to draw terminal")?;
 
         // Wait for events using tokio::select!

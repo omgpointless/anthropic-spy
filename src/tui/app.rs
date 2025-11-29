@@ -71,73 +71,133 @@ pub struct TopicInfo {
 }
 
 /// Main application state for the TUI
+///
+/// # Architecture
+///
+/// The App struct is the central state container for anthropic-spy's TUI.
+/// It's organized into logical groups:
+///
+/// - **Core Data**: Events received from the proxy, accumulated statistics
+/// - **Navigation**: Current view, selection, focus state
+/// - **Appearance**: Theme, preset (layout), animations
+/// - **Input**: Key handling, debouncing
+/// - **Subsystems**: Delegated state (panels, settings, streaming)
+///
+/// # Usage
+///
+/// ```ignore
+/// let mut app = App::new();
+/// app.add_event(event);           // Core: receive proxy events
+/// app.set_view(View::Stats);      // Navigation: switch views
+/// app.select_next();              // Navigation: move selection
+/// app.tick_animation();           // Appearance: advance animations
+/// ```
+///
+/// # Extension Points
+///
+/// - Add new views: extend `View` enum, add rendering in `views/`
+/// - Add new themes: add to `theme/` module, register in `modal.rs`
+/// - Add new presets: add to `preset.rs`
 pub struct App {
-    /// All events received so far
+    // ─────────────────────────────────────────────────────────────────────────
+    // Core Data
+    // The primary data this application manages
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// All proxy events received this session (tool calls, responses, etc.)
     pub events: Vec<ProxyEvent>,
 
-    /// Index of the currently selected event (for detail view)
-    pub selected: usize,
-
-    /// Whether to show the detail view
-    pub show_detail: bool,
-
-    /// Whether the app should quit
-    pub should_quit: bool,
-
-    /// Accumulated statistics
+    /// Accumulated statistics (tokens, costs, tool calls, etc.)
     pub stats: Stats,
 
-    /// When the app started (for uptime display)
-    pub start_time: Instant,
-
-    /// Scroll state for all panels (events, detail, thinking, logs)
-    pub panels: PanelStates,
-
-    /// Input handler for flexible key behavior
-    input_handler: InputHandler,
-
-    /// Log buffer for system logs display
-    pub log_buffer: LogBuffer,
-
-    /// Last time an action key was triggered (for debouncing)
-    last_action_time: Option<Instant>,
-
-    /// Current conversation topic (from Haiku summarization)
+    /// Current conversation topic (extracted from Haiku summarization)
     pub topic: TopicInfo,
 
-    /// Active view
+    /// System log buffer (for the logs panel)
+    pub log_buffer: LogBuffer,
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Navigation & Selection
+    // Where the user is in the UI and what they're looking at
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Active view (Events, Stats, Settings)
     pub view: View,
 
-    /// Settings view state
-    pub settings: SettingsState,
-
-    /// Currently focused panel (receives scroll input)
+    /// Currently focused panel (receives keyboard input)
     pub focused: FocusablePanel,
+
+    /// Index of selected event in the events list
+    pub selected: usize,
+
+    /// Whether the detail panel is visible (toggled with Enter)
+    pub show_detail: bool,
+
+    /// Active modal dialog (Help, etc.) - captures all input when Some
+    pub modal: Option<Modal>,
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Appearance & Animation
+    // Visual presentation: theme, layout, streaming indicators
+    // ─────────────────────────────────────────────────────────────────────────
 
     /// Color theme for the UI
     pub theme: Theme,
 
-    /// Theme configuration (for loading themes with consistent settings)
+    /// Theme configuration (thinking colors, etc.)
     pub theme_config: ThemeConfig,
 
-    /// Streaming state machine (for header animation)
-    streaming_sm: StreamingStateMachine,
+    /// Layout preset (panel arrangement: classic, reasoning, debug)
+    pub preset: Preset,
 
-    /// Animation frame counter (increments each render tick)
+    /// Animation frame counter (for spinners, dots)
     pub animation_frame: usize,
 
-    /// Shared buffer for real-time streaming thinking content
-    /// Proxy writes to this, TUI reads from it each frame
+    // ─────────────────────────────────────────────────────────────────────────
+    // Input Handling
+    // Keyboard event processing and debouncing
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Input handler (tracks pressed keys, prevents double-triggers)
+    input_handler: InputHandler,
+
+    /// Last action key time (for debouncing Enter/Esc/q)
+    last_action_time: Option<Instant>,
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Delegated Subsystems
+    // Complex state that's managed by dedicated structs
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Scroll state for all panels (events, detail, thinking, logs)
+    pub panels: PanelStates,
+
+    /// Settings view state (category, focus, selection)
+    pub settings: SettingsState,
+
+    /// Streaming state machine (idle → thinking → generating)
+    streaming_sm: StreamingStateMachine,
+
+    /// Real-time streaming thinking content (shared with proxy)
     pub streaming_thinking: Option<StreamingThinking>,
 
-    /// Active modal dialog (captures input when Some)
-    pub modal: Option<Modal>,
+    // ─────────────────────────────────────────────────────────────────────────
+    // Lifecycle
+    // Application lifecycle state
+    // ─────────────────────────────────────────────────────────────────────────
 
-    /// Layout preset (controls panel arrangement)
-    pub preset: Preset,
+    /// When the app started (for uptime display)
+    pub start_time: Instant,
+
+    /// Whether the app should quit
+    pub should_quit: bool,
 }
 
 impl App {
+    // ─────────────────────────────────────────────────────────────
+    // Construction
+    // ─────────────────────────────────────────────────────────────
+
     pub fn new() -> Self {
         Self::with_log_buffer(LogBuffer::new())
     }
@@ -167,6 +227,10 @@ impl App {
             preset: Preset::classic(),
         }
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // Streaming & Animation
+    // ─────────────────────────────────────────────────────────────
 
     /// Get current streaming state (for UI display)
     pub fn streaming_state(&self) -> StreamingState {
@@ -204,6 +268,10 @@ impl App {
         // Fall back to completed thinking
         self.stats.current_thinking.clone()
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // View & Focus Navigation
+    // ─────────────────────────────────────────────────────────────
 
     /// Set the active view
     pub fn set_view(&mut self, view: View) {
@@ -301,6 +369,10 @@ impl App {
         }
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // Input Handling
+    // ─────────────────────────────────────────────────────────────
+
     /// Check if an action should be debounced
     /// Returns true if action should be blocked (too soon since last action)
     pub fn should_debounce_action(&mut self) -> bool {
@@ -324,6 +396,10 @@ impl App {
     pub fn handle_key_release(&mut self, key: crossterm::event::KeyCode) {
         self.input_handler.handle_key_release(key);
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // Event Processing
+    // ─────────────────────────────────────────────────────────────
 
     /// Add a new event and update statistics
     pub fn add_event(&mut self, event: ProxyEvent) {
@@ -552,6 +628,10 @@ impl App {
         }
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // Selection & Scrolling
+    // ─────────────────────────────────────────────────────────────
+
     /// Get the currently selected event
     pub fn selected_event(&self) -> Option<&ProxyEvent> {
         self.events.get(self.selected)
@@ -623,6 +703,10 @@ impl App {
             FocusablePanel::Logs => self.panels.logs.scroll_to_bottom(),
         }
     }
+
+    // ─────────────────────────────────────────────────────────────
+    // Utilities
+    // ─────────────────────────────────────────────────────────────
 
     /// Get uptime as a formatted string
     pub fn uptime(&self) -> String {
