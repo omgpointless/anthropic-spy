@@ -7,21 +7,31 @@
 // - Receiving proxy events and updating the display
 
 pub mod app;
+pub mod components;
 pub mod input;
+pub mod layout;
+pub mod markdown;
+pub mod modal;
+pub mod preset;
+pub mod scroll;
+pub mod streaming;
 pub mod ui;
+pub mod views;
 
 use crate::events::ProxyEvent;
 use crate::logging::LogBuffer;
+use crate::StreamingThinking;
 use anyhow::{Context, Result};
-use app::App;
+use app::{App, SettingsFocus, View};
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
-        MouseEvent, MouseEventKind,
+        KeyModifiers, MouseEvent, MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+use modal::{Modal, ModalAction};
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io;
 use std::time::Duration;
@@ -34,6 +44,10 @@ use tokio::sync::mpsc;
 pub async fn run_tui(
     mut event_rx: mpsc::Receiver<ProxyEvent>,
     log_buffer: LogBuffer,
+    context_limit: u64,
+    theme_name: &str,
+    use_theme_background: bool,
+    streaming_thinking: StreamingThinking,
 ) -> Result<()> {
     // Set up terminal
     enable_raw_mode().context("Failed to enable raw mode")?;
@@ -43,8 +57,17 @@ pub async fn run_tui(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context("Failed to create terminal")?;
 
-    // Create app state with log buffer
+    // Create theme config
+    let theme_config = crate::theme::ThemeConfig {
+        use_theme_background,
+    };
+
+    // Create app state with log buffer and config
     let mut app = App::with_log_buffer(log_buffer);
+    app.stats.configured_context_limit = context_limit;
+    app.theme = crate::theme::Theme::by_name_with_config(theme_name, &theme_config);
+    app.theme_config = theme_config;
+    app.streaming_thinking = Some(streaming_thinking);
 
     // Run the event loop
     let result = run_event_loop(&mut terminal, &mut app, &mut event_rx).await;
@@ -82,7 +105,7 @@ async fn run_event_loop(
     loop {
         // Draw the UI
         terminal
-            .draw(|f| ui::draw(f, app))
+            .draw(|f| views::draw(f, app))
             .context("Failed to draw terminal")?;
 
         // Wait for events using tokio::select!
@@ -101,7 +124,8 @@ async fn run_event_loop(
 
             // Periodic tick for redrawing
             _ = tick_interval.tick() => {
-                // Just redraw, handled at the top of the loop
+                // Advance animation frame for spinners
+                app.tick_animation();
             }
 
             // Proxy events
@@ -124,6 +148,19 @@ async fn run_event_loop(
 fn handle_key_event(app: &mut App, key_event: KeyEvent) {
     let key = key_event.code;
 
+    // Modal captures all input when active
+    if let Some(ref mut modal) = app.modal {
+        if key_event.kind == KeyEventKind::Press {
+            match modal.handle_input(key) {
+                ModalAction::None => {}
+                ModalAction::Close => {
+                    app.modal = None;
+                }
+            }
+        }
+        return; // Modal absorbs all input
+    }
+
     match key_event.kind {
         KeyEventKind::Press => {
             // Action keys - use time-based debounce (no release events needed)
@@ -134,9 +171,76 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) {
                     }
                     return;
                 }
-                KeyCode::Enter | KeyCode::Esc => {
+                // View switching - F-keys (primary) and letter shortcuts
+                KeyCode::F(1) | KeyCode::Char('e') | KeyCode::Char('E') => {
                     if !app.should_debounce_action() {
-                        app.toggle_detail();
+                        app.set_view(View::Events);
+                    }
+                    return;
+                }
+                KeyCode::F(2) | KeyCode::Char('s') | KeyCode::Char('S') => {
+                    if !app.should_debounce_action() {
+                        app.set_view(View::Stats);
+                    }
+                    return;
+                }
+                KeyCode::F(3) => {
+                    if !app.should_debounce_action() {
+                        app.set_view(View::Settings);
+                    }
+                    return;
+                }
+                KeyCode::Char('?') => {
+                    if !app.should_debounce_action() {
+                        app.modal = Some(Modal::help());
+                    }
+                    return;
+                }
+                KeyCode::Esc => {
+                    if !app.should_debounce_action() {
+                        // Esc closes detail or goes back to Events
+                        if app.show_detail {
+                            app.toggle_detail();
+                        } else if app.view != View::Events {
+                            app.set_view(View::Events);
+                        }
+                    }
+                    return;
+                }
+                KeyCode::Enter => {
+                    if !app.should_debounce_action() {
+                        match app.view {
+                            View::Events => app.toggle_detail(),
+                            View::Settings => app.settings_apply_option(),
+                            _ => {}
+                        }
+                    }
+                    return;
+                }
+                KeyCode::Tab | KeyCode::Right => {
+                    if !app.should_debounce_action() {
+                        match app.view {
+                            View::Events => {
+                                if key_event.modifiers.contains(KeyModifiers::SHIFT) {
+                                    app.focus_prev();
+                                } else {
+                                    app.focus_next();
+                                }
+                            }
+                            View::Settings => app.settings_toggle_focus(),
+                            _ => {}
+                        }
+                    }
+                    return;
+                }
+                // Backtab or Left arrow - go back
+                KeyCode::BackTab | KeyCode::Left => {
+                    if !app.should_debounce_action() {
+                        match app.view {
+                            View::Events => app.focus_prev(),
+                            View::Settings => app.settings_toggle_focus(),
+                            _ => {}
+                        }
                     }
                     return;
                 }
@@ -149,17 +253,22 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) {
             }
 
             match key {
-                KeyCode::Up | KeyCode::Char('k') => app.select_previous(),
-                KeyCode::Down | KeyCode::Char('j') => app.select_next(),
-                KeyCode::Home => {
-                    app.selected = 0;
-                    app.scroll_offset = 0;
-                }
-                KeyCode::End => {
-                    if !app.events.is_empty() {
-                        app.selected = app.events.len() - 1;
-                    }
-                }
+                KeyCode::Up | KeyCode::Char('k') => match app.view {
+                    View::Settings => match app.settings.focus {
+                        SettingsFocus::Categories => app.settings_prev_category(),
+                        SettingsFocus::Options => app.settings_prev_option(),
+                    },
+                    _ => app.select_previous(),
+                },
+                KeyCode::Down | KeyCode::Char('j') => match app.view {
+                    View::Settings => match app.settings.focus {
+                        SettingsFocus::Categories => app.settings_next_category(),
+                        SettingsFocus::Options => app.settings_next_option(),
+                    },
+                    _ => app.select_next(),
+                },
+                KeyCode::Home => app.scroll_to_top(),
+                KeyCode::End => app.scroll_to_bottom(),
                 _ => {}
             }
         }
