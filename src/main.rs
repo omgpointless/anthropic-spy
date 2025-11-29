@@ -242,6 +242,7 @@ async fn main() -> Result<()> {
             log_buffer,
             config.context_limit,
             &config.theme,
+            config.use_theme_background,
             streaming_thinking,
         )
         .await

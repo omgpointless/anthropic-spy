@@ -35,6 +35,7 @@ Context at {percent}% ({current_k}K/{limit_k}K). Consider `/compact` to free up 
 
 /// Check if we should inject a context warning and return the modified request body if so
 /// Returns None if no injection needed, Some(modified_body) if injection was done
+/// TODO: NOT IN USE. Needs rewrite if we need specific request injections.
 pub fn maybe_inject_context_warning(
     body_bytes: &[u8],
     context_state: &SharedContextState,

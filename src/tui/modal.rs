@@ -3,31 +3,25 @@
 // Self-contained modal dialogs that handle their own input and return actions.
 // App just holds Option<Modal>, input routing acts on returned ModalAction.
 
-use crate::theme::Theme;
+use crate::theme::list_embedded_themes;
 use crossterm::event::KeyCode;
 
-/// Available themes (const for zero-allocation lookups)
-pub const THEME_LIST: &[&str] = &[
-    "basic",
-    "terminal",
-    "dracula",
-    "monokai",
-    "monokai-pro-gogh",
-    "nord",
-    "gruvbox",
-];
+/// Available themes - re-exported from theme module for UI access
+pub fn theme_list() -> &'static [&'static str] {
+    list_embedded_themes()
+}
 
 /// Actions returned by modal input handling
 #[derive(Debug, Clone)]
 pub enum ModalAction {
     /// Input consumed, no state change needed
     None,
-    /// Modal closed, restore original theme
-    Cancel(String), // original theme name to restore
+    /// Modal closed, restore original theme (theme name)
+    Cancel(String),
     /// Theme was selected and confirmed (already applied via Preview)
     Apply,
-    /// Preview theme changed (live preview)
-    Preview(Theme),
+    /// Preview theme changed - caller should create Theme with their config
+    Preview(String), // theme name
 }
 
 /// Available modal types
@@ -63,9 +57,10 @@ pub struct ThemeSelectorState {
 impl ThemeSelectorState {
     pub fn new(current_theme: &str) -> Self {
         // Find current theme in list, default to 0
-        let selected = THEME_LIST
+        // Case-insensitive match since theme names may vary in casing
+        let selected = theme_list()
             .iter()
-            .position(|&t| t == current_theme)
+            .position(|&t| t.eq_ignore_ascii_case(current_theme))
             .unwrap_or(0);
 
         Self {
@@ -79,13 +74,13 @@ impl ThemeSelectorState {
         match key {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.select_prev();
-                // Return preview for live update
-                ModalAction::Preview(Theme::by_name(self.selected_theme_name()))
+                // Return preview theme name for live update
+                ModalAction::Preview(self.selected_theme_name().to_string())
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 self.select_next();
-                // Return preview for live update
-                ModalAction::Preview(Theme::by_name(self.selected_theme_name()))
+                // Return preview theme name for live update
+                ModalAction::Preview(self.selected_theme_name().to_string())
             }
             KeyCode::Enter => {
                 // Confirm selection (theme already applied via preview)
@@ -108,13 +103,18 @@ impl ThemeSelectorState {
 
     /// Move selection down
     fn select_next(&mut self) {
-        if self.selected < THEME_LIST.len() - 1 {
+        if self.selected < theme_list().len() - 1 {
             self.selected += 1;
         }
     }
 
     /// Get the currently selected theme name
     pub fn selected_theme_name(&self) -> &str {
-        THEME_LIST[self.selected]
+        theme_list()[self.selected]
+    }
+
+    /// Get the number of available themes
+    pub fn theme_count(&self) -> usize {
+        theme_list().len()
     }
 }

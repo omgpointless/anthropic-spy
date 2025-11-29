@@ -19,7 +19,7 @@ use crate::events::ProxyEvent;
 use crate::logging::LogBuffer;
 use crate::StreamingThinking;
 use anyhow::{Context, Result};
-use app::{App, View};
+use app::{App, SettingsFocus, View};
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind,
@@ -43,6 +43,7 @@ pub async fn run_tui(
     log_buffer: LogBuffer,
     context_limit: u64,
     theme_name: &str,
+    use_theme_background: bool,
     streaming_thinking: StreamingThinking,
 ) -> Result<()> {
     // Set up terminal
@@ -53,10 +54,16 @@ pub async fn run_tui(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).context("Failed to create terminal")?;
 
+    // Create theme config
+    let theme_config = crate::theme::ThemeConfig {
+        use_theme_background,
+    };
+
     // Create app state with log buffer and config
     let mut app = App::with_log_buffer(log_buffer);
     app.stats.configured_context_limit = context_limit;
-    app.theme = crate::theme::Theme::by_name(theme_name);
+    app.theme = crate::theme::Theme::by_name_with_config(theme_name, &theme_config);
+    app.theme_config = theme_config;
     app.streaming_thinking = Some(streaming_thinking);
 
     // Run the event loop
@@ -145,16 +152,18 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) {
                 ModalAction::None => {}
                 ModalAction::Cancel(original) => {
                     // Restore original theme and close
-                    app.theme = crate::theme::Theme::by_name(&original);
+                    app.theme =
+                        crate::theme::Theme::by_name_with_config(&original, &app.theme_config);
                     app.modal = None;
                 }
                 ModalAction::Apply => {
                     // Theme already applied via Preview, just close
                     app.modal = None;
                 }
-                ModalAction::Preview(theme) => {
-                    // Live preview - apply theme immediately
-                    app.theme = theme;
+                ModalAction::Preview(theme_name) => {
+                    // Live preview - create theme with config and apply immediately
+                    app.theme =
+                        crate::theme::Theme::by_name_with_config(&theme_name, &app.theme_config);
                 }
             }
         }
@@ -178,16 +187,22 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) {
                     }
                     return;
                 }
-                // View switching
-                KeyCode::Char('s') | KeyCode::Char('S') => {
+                // View switching - F-keys (primary) and letter shortcuts
+                KeyCode::F(1) | KeyCode::Char('e') | KeyCode::Char('E') => {
+                    if !app.should_debounce_action() {
+                        app.set_view(View::Events);
+                    }
+                    return;
+                }
+                KeyCode::F(2) | KeyCode::Char('s') | KeyCode::Char('S') => {
                     if !app.should_debounce_action() {
                         app.set_view(View::Stats);
                     }
                     return;
                 }
-                KeyCode::Char('e') | KeyCode::Char('E') => {
+                KeyCode::F(3) => {
                     if !app.should_debounce_action() {
-                        app.set_view(View::Events);
+                        app.set_view(View::Settings);
                     }
                     return;
                 }
@@ -213,25 +228,39 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) {
                     return;
                 }
                 KeyCode::Enter => {
-                    if !app.should_debounce_action() && app.view == View::Events {
-                        app.toggle_detail();
-                    }
-                    return;
-                }
-                KeyCode::Tab => {
-                    if !app.should_debounce_action() && app.view == View::Events {
-                        if key_event.modifiers.contains(KeyModifiers::SHIFT) {
-                            app.focus_prev();
-                        } else {
-                            app.focus_next();
+                    if !app.should_debounce_action() {
+                        match app.view {
+                            View::Events => app.toggle_detail(),
+                            View::Settings => app.settings_apply_option(),
+                            _ => {}
                         }
                     }
                     return;
                 }
-                // Backtab is what some terminals send for Shift+Tab
-                KeyCode::BackTab => {
-                    if !app.should_debounce_action() && app.view == View::Events {
-                        app.focus_prev();
+                KeyCode::Tab | KeyCode::Right => {
+                    if !app.should_debounce_action() {
+                        match app.view {
+                            View::Events => {
+                                if key_event.modifiers.contains(KeyModifiers::SHIFT) {
+                                    app.focus_prev();
+                                } else {
+                                    app.focus_next();
+                                }
+                            }
+                            View::Settings => app.settings_toggle_focus(),
+                            _ => {}
+                        }
+                    }
+                    return;
+                }
+                // Backtab or Left arrow - go back
+                KeyCode::BackTab | KeyCode::Left => {
+                    if !app.should_debounce_action() {
+                        match app.view {
+                            View::Events => app.focus_prev(),
+                            View::Settings => app.settings_toggle_focus(),
+                            _ => {}
+                        }
                     }
                     return;
                 }
@@ -244,8 +273,20 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) {
             }
 
             match key {
-                KeyCode::Up | KeyCode::Char('k') => app.select_previous(),
-                KeyCode::Down | KeyCode::Char('j') => app.select_next(),
+                KeyCode::Up | KeyCode::Char('k') => match app.view {
+                    View::Settings => match app.settings.focus {
+                        SettingsFocus::Categories => app.settings_prev_category(),
+                        SettingsFocus::Options => app.settings_prev_option(),
+                    },
+                    _ => app.select_previous(),
+                },
+                KeyCode::Down | KeyCode::Char('j') => match app.view {
+                    View::Settings => match app.settings.focus {
+                        SettingsFocus::Categories => app.settings_next_category(),
+                        SettingsFocus::Options => app.settings_next_option(),
+                    },
+                    _ => app.select_next(),
+                },
                 KeyCode::Home => app.scroll_to_top(),
                 KeyCode::End => app.scroll_to_bottom(),
                 _ => {}

@@ -4,9 +4,9 @@
 // you define the UI layout and widgets in a render function that gets
 // called on every frame.
 
-use super::app::{App, StreamingState, View};
+use super::app::{App, SettingsCategory, SettingsFocus, StreamingState, View};
 use super::layout::Breakpoint;
-use super::modal::{Modal, ThemeSelectorState, THEME_LIST};
+use super::modal::{theme_list, Modal, ThemeSelectorState};
 use super::preset::{LayoutDirection, Panel};
 use super::scroll::FocusablePanel;
 use crate::events::ProxyEvent;
@@ -72,6 +72,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         match app.view {
             View::Events => render_events_content(f, area, app),
             View::Stats => render_stats_view(f, area, app),
+            View::Settings => render_settings_view(f, area, app),
             View::Help => render_help_view(f, area, app),
         }
     }
@@ -442,6 +443,186 @@ fn tool_color(tool: &str) -> Color {
         "TodoWrite" => Color::Magenta,
         _ => Color::White,
     }
+}
+
+/// Preset names for the layout selector
+const PRESET_LIST: &[(&str, &str)] = &[
+    ("classic", "Side-by-side events and thinking"),
+    ("reasoning", "Thinking-first, larger reasoning panel"),
+    ("debug", "Expanded logs for debugging"),
+];
+
+/// Render the Settings view - two panel layout with categories and options
+fn render_settings_view(f: &mut Frame, area: Rect, app: &App) {
+    // Split into left nav (fixed) and right content (fill)
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Length(22), Constraint::Min(30)])
+        .split(area);
+
+    render_settings_categories(f, chunks[0], app);
+    render_settings_options(f, chunks[1], app);
+}
+
+/// Render the left category navigation panel
+fn render_settings_categories(f: &mut Frame, area: Rect, app: &App) {
+    let categories = [
+        (SettingsCategory::Appearance, "Appearance"),
+        (SettingsCategory::Layout, "Layout"),
+    ];
+
+    let is_focused = app.settings.focus == SettingsFocus::Categories;
+    let border_color = if is_focused {
+        app.theme.tool_result_ok // Highlight when focused
+    } else {
+        app.theme.border
+    };
+
+    let items: Vec<ListItem> = categories
+        .iter()
+        .map(|(cat, name)| {
+            let is_selected = app.settings.category == *cat;
+            let prefix = if is_selected { " ▸ " } else { "   " };
+            let style = if is_selected {
+                Style::default()
+                    .fg(app.theme.highlight)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+            ListItem::new(format!("{}{}", prefix, name)).style(style)
+        })
+        .collect();
+
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border_color))
+            .title(" Categories "),
+    );
+
+    f.render_widget(list, area);
+}
+
+/// Render the right options panel based on selected category
+fn render_settings_options(f: &mut Frame, area: Rect, app: &App) {
+    let is_focused = app.settings.focus == SettingsFocus::Options;
+    let border_color = if is_focused {
+        app.theme.tool_result_ok
+    } else {
+        app.theme.border
+    };
+
+    match app.settings.category {
+        SettingsCategory::Appearance => {
+            render_theme_options(f, area, app, is_focused, border_color);
+        }
+        SettingsCategory::Layout => {
+            render_preset_options(f, area, app, is_focused, border_color);
+        }
+    }
+}
+
+/// Render theme selection options
+fn render_theme_options(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    is_focused: bool,
+    border_color: Color,
+) {
+    let items: Vec<ListItem> = theme_list()
+        .iter()
+        .enumerate()
+        .map(|(i, &theme_name)| {
+            let is_current = theme_name == app.theme.name;
+            let is_highlighted = is_focused && i == app.settings.option_index;
+
+            let prefix = if is_current { " ● " } else { "   " };
+
+            let style = if is_highlighted {
+                Style::default()
+                    .bg(app.theme.highlight)
+                    .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_current {
+                Style::default()
+                    .fg(app.theme.tool_result_ok)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+
+            ListItem::new(format!("{}{}", prefix, theme_name)).style(style)
+        })
+        .collect();
+
+    let title = if is_focused {
+        " Theme (↑↓ select, Enter apply) "
+    } else {
+        " Theme "
+    };
+
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border_color))
+            .title(title),
+    );
+
+    f.render_widget(list, area);
+}
+
+/// Render preset selection options
+fn render_preset_options(
+    f: &mut Frame,
+    area: Rect,
+    app: &App,
+    is_focused: bool,
+    border_color: Color,
+) {
+    let items: Vec<ListItem> = PRESET_LIST
+        .iter()
+        .enumerate()
+        .map(|(i, (name, desc))| {
+            let is_current = *name == app.preset.name;
+            let is_highlighted = is_focused && i == app.settings.option_index;
+
+            let prefix = if is_current { " ● " } else { "   " };
+
+            let style = if is_highlighted {
+                Style::default()
+                    .bg(app.theme.highlight)
+                    .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_current {
+                Style::default()
+                    .fg(app.theme.tool_result_ok)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+
+            // Show name and description
+            let text = format!("{}{:<12} {}", prefix, name, desc);
+            ListItem::new(text).style(style)
+        })
+        .collect();
+
+    let title = if is_focused {
+        " Layout Preset (↑↓ select, Enter apply) "
+    } else {
+        " Layout Preset "
+    };
+
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border_color))
+            .title(title),
+    );
+
+    f.render_widget(list, area);
 }
 
 /// Render the Help view
@@ -1406,7 +1587,7 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 fn render_theme_selector(f: &mut Frame, state: &ThemeSelectorState, app: &App) {
     // Calculate modal size: width for theme names + padding, height for list + header/footer
     let width = 40;
-    let height = (THEME_LIST.len() + 4) as u16; // +4 for borders, title, help text
+    let height = (theme_list().len() + 4) as u16; // +4 for borders, title, help text
 
     let area = centered_rect(width, height, f.area());
 
@@ -1414,7 +1595,7 @@ fn render_theme_selector(f: &mut Frame, state: &ThemeSelectorState, app: &App) {
     f.render_widget(Clear, area);
 
     // Build list items with selection highlight
-    let items: Vec<ListItem> = THEME_LIST
+    let items: Vec<ListItem> = theme_list()
         .iter()
         .enumerate()
         .map(|(i, &name)| {

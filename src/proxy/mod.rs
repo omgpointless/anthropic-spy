@@ -468,48 +468,57 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                         // Check if this chunk contains message_delta - inject before forwarding
                         // Only inject on end_turn responses (not tool_use)
                         if !injected {
-                            if let Ok(chunk_str) = std::str::from_utf8(&chunk) {
-                                if chunk_str.contains("message_delta") {
-                                    // Parse stop_reason to decide if we should inject
-                                    let is_end_turn = chunk_str
-                                        .contains("\"stop_reason\":\"end_turn\"")
-                                        || chunk_str.contains("\"stop_reason\": \"end_turn\"");
-                                    let is_tool_use = chunk_str
-                                        .contains("\"stop_reason\":\"tool_use\"")
-                                        || chunk_str.contains("\"stop_reason\": \"tool_use\"");
+                            match std::str::from_utf8(&chunk) {
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "SSE injection skipped: UTF-8 decode failed: {}",
+                                        e
+                                    );
+                                }
+                                Ok(chunk_str) => {
+                                    if chunk_str.contains("message_delta") {
+                                        // Parse stop_reason to decide if we should inject
+                                        let is_end_turn = chunk_str
+                                            .contains("\"stop_reason\":\"end_turn\"")
+                                            || chunk_str.contains("\"stop_reason\": \"end_turn\"");
+                                        let is_tool_use = chunk_str
+                                            .contains("\"stop_reason\":\"tool_use\"")
+                                            || chunk_str.contains("\"stop_reason\": \"tool_use\"");
 
-                                    // Skip injection on Haiku utility calls (topic gen, etc.)
-                                    let is_haiku = response_model.to_lowercase().contains("haiku");
+                                        // Skip injection on Haiku utility calls (topic gen, etc.)
+                                        let is_haiku =
+                                            response_model.to_lowercase().contains("haiku");
 
-                                    if is_tool_use {
-                                        tracing::debug!(
-                                            "SSE: tool_use response, skipping injection"
-                                        );
-                                    } else if is_haiku {
-                                        tracing::debug!(
-                                            "SSE: Haiku response ({}), skipping injection",
-                                            response_model
-                                        );
-                                    } else if is_end_turn {
-                                        // Safe to inject on main conversation response
-                                        if let Some(injection) =
-                                            interceptor::maybe_generate_sse_injection(
-                                                &context_state,
-                                                max_block_index,
-                                            )
-                                        {
-                                            tracing::info!(
+                                        if is_tool_use {
+                                            tracing::debug!(
+                                                "SSE: tool_use response, skipping injection"
+                                            );
+                                        } else if is_haiku {
+                                            tracing::debug!(
+                                                "SSE: Haiku response ({}), skipping injection",
+                                                response_model
+                                            );
+                                        } else if is_end_turn {
+                                            // Safe to inject on main conversation response
+                                            if let Some(injection) =
+                                                interceptor::maybe_generate_sse_injection(
+                                                    &context_state,
+                                                    max_block_index,
+                                                )
+                                            {
+                                                tracing::info!(
                                                 "SSE: injecting context warning at block index {} (model: {})",
                                                 max_block_index,
                                                 response_model
                                             );
-                                            let _ = tx.send(Ok(Bytes::from(injection))).await;
-                                            injected = true;
-                                        } else {
-                                            tracing::info!(
-                                                "SSE: end_turn (model: {}), threshold not met",
-                                                response_model
-                                            );
+                                                let _ = tx.send(Ok(Bytes::from(injection))).await;
+                                                injected = true;
+                                            } else {
+                                                tracing::info!(
+                                                    "SSE: end_turn (model: {}), threshold not met",
+                                                    response_model
+                                                );
+                                            }
                                         }
                                     }
                                 }
@@ -524,7 +533,32 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                     }
                 }
                 Err(e) => {
-                    tracing::error!("Error reading stream chunk: {}", e);
+                    let error_msg = format!("Error reading stream chunk: {}", e);
+                    tracing::error!("{}", error_msg);
+
+                    // Emit error event for observability (JSONL logs + TUI)
+                    let _ = event_tx_tui
+                        .send(ProxyEvent::Error {
+                            timestamp: chrono::Utc::now(),
+                            message: error_msg.clone(),
+                            context: Some(format!(
+                                "request_id: {}, accumulated: {} bytes",
+                                request_id_clone,
+                                accumulated.len()
+                            )),
+                        })
+                        .await;
+                    let _ = event_tx_storage
+                        .send(ProxyEvent::Error {
+                            timestamp: chrono::Utc::now(),
+                            message: error_msg,
+                            context: Some(format!(
+                                "request_id: {}, accumulated: {} bytes",
+                                request_id_clone,
+                                accumulated.len()
+                            )),
+                        })
+                        .await;
                     break;
                 }
             }
@@ -573,15 +607,18 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
         if is_messages_endpoint {
             if let Ok(events) = parser.parse_response(&accumulated).await {
                 for event in events {
-                    // Update context state when we see ApiUsage
+                    // Update context state when we see ApiUsage (skip Haiku utility calls)
                     if let ProxyEvent::ApiUsage {
                         input_tokens,
                         cache_read_tokens,
+                        model,
                         ..
                     } = &event
                     {
-                        if let Ok(mut ctx) = context_state.lock() {
-                            ctx.update(*input_tokens as u64, *cache_read_tokens as u64);
+                        if !model.to_lowercase().contains("haiku") {
+                            if let Ok(mut ctx) = context_state.lock() {
+                                ctx.update(*input_tokens as u64, *cache_read_tokens as u64);
+                            }
                         }
                     }
                     // Reset warnings on context compact
@@ -675,15 +712,18 @@ async fn handle_buffered_response(ctx: ResponseContext) -> Result<Response<Body>
     if is_messages_endpoint && status.is_success() {
         if let Ok(events) = state.parser.parse_response(&response_body).await {
             for event in events {
-                // Update context state when we see ApiUsage
+                // Update context state when we see ApiUsage (skip Haiku utility calls)
                 if let ProxyEvent::ApiUsage {
                     input_tokens,
                     cache_read_tokens,
+                    model,
                     ..
                 } = &event
                 {
-                    if let Ok(mut ctx) = state.context_state.lock() {
-                        ctx.update(*input_tokens as u64, *cache_read_tokens as u64);
+                    if !model.to_lowercase().contains("haiku") {
+                        if let Ok(mut ctx) = state.context_state.lock() {
+                            ctx.update(*input_tokens as u64, *cache_read_tokens as u64);
+                        }
                     }
                 }
                 // Reset warnings on context compact

@@ -11,17 +11,20 @@
 #
 # Run: vhs demo.tape
 # Or via Docker: docker run --rm -v $(pwd):/work anthropic-spy-vhs /work/demo.tape
+#
+# Theme sync: Both VHS and anthropic-spy use iTerm2-Color-Schemes format.
+# Set the same theme name for consistent appearance.
 
 Output "/work/demo.gif"
 Set FontSize 13
 Set Width 1400
 Set Height 850
-Set Theme "Molokai"
+Set Theme "Dracula"
 Set Padding 15
 Set Framerate 30
 
-# Start demo mode
-Type "ANTHROPIC_SPY_DEMO=1 /app/target/release/anthropic-spy"
+# Start demo mode with matching theme
+Type "ANTHROPIC_SPY_DEMO=1 ANTHROPIC_SPY_THEME=Dracula /app/target/release/anthropic-spy"
 Sleep 300ms
 Enter
 

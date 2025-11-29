@@ -4,13 +4,13 @@
 // of events, selected item, statistics, and UI state.
 
 use super::input::InputHandler;
-use super::modal::Modal;
-use super::preset::Preset;
+use super::modal::{theme_list, Modal};
+use super::preset::{get_preset, Preset};
 use super::scroll::{FocusablePanel, PanelStates};
 use super::streaming::StreamingStateMachine;
 use crate::events::{ProxyEvent, Stats};
 use crate::logging::LogBuffer;
-use crate::theme::Theme;
+use crate::theme::{Theme, ThemeConfig};
 use crate::StreamingThinking;
 use std::time::{Duration, Instant};
 
@@ -27,7 +27,39 @@ pub enum View {
     #[default]
     Events,
     Stats,
-    Help,
+    Settings,
+    Help, // TODO: Convert to modal overlay
+}
+
+/// Settings categories for navigation
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SettingsCategory {
+    #[default]
+    Appearance,
+    Layout,
+}
+
+/// Which pane is focused in Settings view
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SettingsFocus {
+    #[default]
+    Categories,
+    Options,
+}
+
+/// State for the Settings view
+#[derive(Debug, Clone, Default)]
+pub struct SettingsState {
+    /// Which category is selected in the left nav
+    pub category: SettingsCategory,
+    /// Which pane has focus (categories or options)
+    pub focus: SettingsFocus,
+    /// Selected option index within current category
+    pub option_index: usize,
+    /// Preview theme while navigating (not yet applied)
+    pub preview_theme: Option<String>,
+    /// Preview preset while navigating (not yet applied)
+    pub preview_preset: Option<String>,
 }
 
 /// Topic info extracted from Haiku's summarization
@@ -75,11 +107,17 @@ pub struct App {
     /// Active view
     pub view: View,
 
+    /// Settings view state
+    pub settings: SettingsState,
+
     /// Currently focused panel (receives scroll input)
     pub focused: FocusablePanel,
 
     /// Color theme for the UI
     pub theme: Theme,
+
+    /// Theme configuration (for loading themes with consistent settings)
+    pub theme_config: ThemeConfig,
 
     /// Streaming state machine (for header animation)
     streaming_sm: StreamingStateMachine,
@@ -117,8 +155,10 @@ impl App {
             last_action_time: None,
             topic: TopicInfo::default(),
             view: View::default(),
+            settings: SettingsState::default(),
             focused: FocusablePanel::default(),
             theme: Theme::default(),
+            theme_config: ThemeConfig::default(),
             streaming_sm: StreamingStateMachine::new(),
             animation_frame: 0,
             streaming_thinking: None,
@@ -180,6 +220,78 @@ impl App {
     /// Check if a panel is currently focused
     pub fn is_focused(&self, panel: FocusablePanel) -> bool {
         self.focused == panel
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Settings view navigation
+    // ─────────────────────────────────────────────────────────────
+
+    /// Toggle focus between categories and options in Settings view
+    pub fn settings_toggle_focus(&mut self) {
+        self.settings.focus = match self.settings.focus {
+            SettingsFocus::Categories => SettingsFocus::Options,
+            SettingsFocus::Options => SettingsFocus::Categories,
+        };
+    }
+
+    /// Move to next category in Settings view
+    pub fn settings_next_category(&mut self) {
+        self.settings.category = match self.settings.category {
+            SettingsCategory::Appearance => SettingsCategory::Layout,
+            SettingsCategory::Layout => SettingsCategory::Layout, // Stay at end
+        };
+        self.settings.option_index = 0; // Reset option selection
+    }
+
+    /// Move to previous category in Settings view
+    pub fn settings_prev_category(&mut self) {
+        self.settings.category = match self.settings.category {
+            SettingsCategory::Appearance => SettingsCategory::Appearance, // Stay at start
+            SettingsCategory::Layout => SettingsCategory::Appearance,
+        };
+        self.settings.option_index = 0; // Reset option selection
+    }
+
+    /// Move to next option in Settings view
+    pub fn settings_next_option(&mut self) {
+        let max_index = self.settings_max_option_index();
+        if self.settings.option_index < max_index {
+            self.settings.option_index += 1;
+        }
+    }
+
+    /// Move to previous option in Settings view
+    pub fn settings_prev_option(&mut self) {
+        if self.settings.option_index > 0 {
+            self.settings.option_index -= 1;
+        }
+    }
+
+    /// Get the maximum option index for current category
+    fn settings_max_option_index(&self) -> usize {
+        match self.settings.category {
+            SettingsCategory::Appearance => theme_list().len().saturating_sub(1),
+            SettingsCategory::Layout => 2, // 3 presets - 1
+        }
+    }
+
+    /// Apply the currently selected option in Settings view
+    pub fn settings_apply_option(&mut self) {
+        match self.settings.category {
+            SettingsCategory::Appearance => {
+                // Apply selected theme
+                if let Some(&theme_name) = theme_list().get(self.settings.option_index) {
+                    self.theme = Theme::by_name_with_config(theme_name, &self.theme_config);
+                }
+            }
+            SettingsCategory::Layout => {
+                // Apply selected preset
+                let preset_names = ["classic", "reasoning", "debug"];
+                if let Some(&preset_name) = preset_names.get(self.settings.option_index) {
+                    self.preset = get_preset(preset_name);
+                }
+            }
+        }
     }
 
     /// Check if an action should be debounced

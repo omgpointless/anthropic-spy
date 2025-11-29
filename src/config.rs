@@ -59,6 +59,9 @@ pub struct Config {
     /// Theme name: "basic", "terminal", "dracula", "monokai", "nord", "gruvbox"
     pub theme: String,
 
+    /// Use theme's background color (true) or terminal's default (false)
+    pub use_theme_background: bool,
+
     /// Feature flags for optional modules
     pub features: Features,
 }
@@ -79,6 +82,7 @@ struct FileConfig {
     api_url: Option<String>,
     log_dir: Option<String>,
     theme: Option<String>,
+    use_theme_background: Option<bool>,
 
     /// Optional [features] section
     features: Option<FileFeatures>,
@@ -113,8 +117,13 @@ impl Config {
         let template = r#"# anthropic-spy configuration
 # Uncomment and modify options as needed
 
-# Theme: basic, terminal, dracula, monokai, monokai-pro-gogh, nord, gruvbox
-# theme = "basic"
+# Theme: One Half Dark, Dracula, Nord, Gruvbox Dark, Monokai Pro, TokyoNight, etc.
+# See full list in the theme selector (press 't' in the TUI)
+# theme = "One Half Dark"
+
+# Use theme's background color (true) or terminal's default (false)
+# Set to false if you want the TUI to inherit your terminal's background
+# use_theme_background = true
 
 # Context window limit for the gauge (default: 150000)
 # context_limit = 150000
@@ -193,11 +202,14 @@ impl Config {
             .or(file.context_limit)
             .unwrap_or(150_000);
 
-        // Theme: env > file > default ("basic" for consistent RGB colors)
+        // Theme: env > file > default ("One Half Dark" for consistent RGB colors)
         let theme = std::env::var("ANTHROPIC_SPY_THEME")
             .ok()
             .or(file.theme)
-            .unwrap_or_else(|| "basic".to_string());
+            .unwrap_or_else(|| "One Half Dark".to_string());
+
+        // Use theme background: file > default (true = use theme's bg color)
+        let use_theme_background = file.use_theme_background.unwrap_or(true);
 
         // Feature flags: file config only (env vars would be verbose)
         let file_features = file.features.unwrap_or_default();
@@ -215,6 +227,7 @@ impl Config {
             demo_mode,
             context_limit,
             theme,
+            use_theme_background,
             features,
         }
     }
@@ -229,7 +242,8 @@ impl Default for Config {
             enable_tui: true,
             demo_mode: false,
             context_limit: 150_000,
-            theme: "basic".to_string(),
+            theme: "One Half Dark".to_string(),
+            use_theme_background: true,
             features: Features::default(),
         }
     }
