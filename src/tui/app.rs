@@ -28,7 +28,6 @@ pub enum View {
     Events,
     Stats,
     Settings,
-    Help, // TODO: Convert to modal overlay
 }
 
 /// Settings categories for navigation
@@ -57,8 +56,10 @@ pub struct SettingsState {
     /// Selected option index within current category
     pub option_index: usize,
     /// Preview theme while navigating (not yet applied)
+    #[allow(dead_code)] // Future: live preview in Settings
     pub preview_theme: Option<String>,
     /// Preview preset while navigating (not yet applied)
+    #[allow(dead_code)] // Future: live preview in Settings
     pub preview_preset: Option<String>,
 }
 
@@ -181,6 +182,12 @@ impl App {
     pub fn spinner_char(&self) -> char {
         const SPINNER: [char; 4] = ['◐', '◓', '◑', '◒'];
         SPINNER[self.animation_frame % SPINNER.len()]
+    }
+
+    /// Get animated dots for thinking indicator (standard AI "thinking..." pattern)
+    pub fn thinking_dots(&self) -> &'static str {
+        const DOTS: [&str; 4] = ["", ".", "..", "..."];
+        DOTS[self.animation_frame % DOTS.len()]
     }
 
     /// Get current thinking content for display

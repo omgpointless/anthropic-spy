@@ -10,6 +10,7 @@ use serde::Deserialize;
 /// Standard 16-color ANSI palette plus terminal special colors.
 /// This mirrors the VHS JSON theme format exactly.
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Full palette kept for VHS export compatibility
 pub struct ColorPalette {
     pub name: String,
 
@@ -153,6 +154,7 @@ impl ColorPalette {
     }
 
     /// Export palette back to VHS JSON format
+    #[allow(dead_code)] // Used for VHS demo recordings
     pub fn to_vhs_json(&self) -> String {
         fn color_to_hex(c: Color) -> String {
             match c {

@@ -506,7 +506,7 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                                                     max_block_index,
                                                 )
                                             {
-                                                tracing::info!(
+                                                tracing::debug!(
                                                 "SSE: injecting context warning at block index {} (model: {})",
                                                 max_block_index,
                                                 response_model
@@ -514,7 +514,7 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                                                 let _ = tx.send(Ok(Bytes::from(injection))).await;
                                                 injected = true;
                                             } else {
-                                                tracing::info!(
+                                                tracing::debug!(
                                                     "SSE: end_turn (model: {}), threshold not met",
                                                     response_model
                                                 );

@@ -9,6 +9,7 @@
 pub mod app;
 pub mod input;
 pub mod layout;
+pub mod markdown;
 pub mod modal;
 pub mod preset;
 pub mod scroll;
@@ -150,20 +151,8 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) {
         if key_event.kind == KeyEventKind::Press {
             match modal.handle_input(key) {
                 ModalAction::None => {}
-                ModalAction::Cancel(original) => {
-                    // Restore original theme and close
-                    app.theme =
-                        crate::theme::Theme::by_name_with_config(&original, &app.theme_config);
+                ModalAction::Close => {
                     app.modal = None;
-                }
-                ModalAction::Apply => {
-                    // Theme already applied via Preview, just close
-                    app.modal = None;
-                }
-                ModalAction::Preview(theme_name) => {
-                    // Live preview - create theme with config and apply immediately
-                    app.theme =
-                        crate::theme::Theme::by_name_with_config(&theme_name, &app.theme_config);
                 }
             }
         }
@@ -177,13 +166,6 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) {
                 KeyCode::Char('q') | KeyCode::Char('Q') => {
                     if !app.should_debounce_action() {
                         app.should_quit = true;
-                    }
-                    return;
-                }
-                // Theme selector
-                KeyCode::Char('t') | KeyCode::Char('T') => {
-                    if !app.should_debounce_action() {
-                        app.modal = Some(Modal::theme_selector(&app.theme.name));
                     }
                     return;
                 }
@@ -208,11 +190,7 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) {
                 }
                 KeyCode::Char('?') => {
                     if !app.should_debounce_action() {
-                        if app.view == View::Help {
-                            app.set_view(View::Events);
-                        } else {
-                            app.set_view(View::Help);
-                        }
+                        app.modal = Some(Modal::help());
                     }
                     return;
                 }

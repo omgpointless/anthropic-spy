@@ -21,12 +21,13 @@ pub enum Panel {
 
     // Content panels (arranged by view layouts)
     Events,
+    #[allow(dead_code)] // Future: event detail panel
     EventDetail,
     Thinking,
 
     // View-specific panels
     Stats,
-    Help,
+    #[allow(dead_code)] // Future: settings panel in preset
     Settings,
 }
 
@@ -49,6 +50,7 @@ pub struct ResponsiveRule {
 
 impl ResponsiveRule {
     /// Panel hidden below this breakpoint
+    #[allow(dead_code)] // Future: responsive panel hiding
     pub fn hidden_below(bp: Breakpoint) -> Self {
         Self {
             min_breakpoint: Some(bp),
@@ -80,11 +82,11 @@ pub enum SizeConstraint {
 
 impl SizeConstraint {
     /// Convert to ratatui Constraint
-    pub fn to_constraint(&self) -> Constraint {
+    pub fn to_constraint(self) -> Constraint {
         match self {
-            SizeConstraint::Fixed(n) => Constraint::Length(*n),
-            SizeConstraint::Percent(p) => Constraint::Percentage(*p),
-            SizeConstraint::Min(n) => Constraint::Min(*n),
+            SizeConstraint::Fixed(n) => Constraint::Length(n),
+            SizeConstraint::Percent(p) => Constraint::Percentage(p),
+            SizeConstraint::Min(n) => Constraint::Min(n),
             SizeConstraint::Fill => Constraint::Min(1), // Will be calculated
         }
     }
@@ -190,8 +192,9 @@ pub struct Preset {
     pub name: String,
     pub shell: ShellConfig,
     pub events_view: ViewLayout,
+    #[allow(dead_code)] // Future: preset-driven stats layout
     pub stats_view: ViewLayout,
-    pub help_view: ViewLayout,
+    #[allow(dead_code)] // Future: preset-driven settings layout
     pub settings_view: Option<ViewLayout>,
 }
 
@@ -228,11 +231,7 @@ impl Preset {
                 layout: Layout::vertical(vec![LayoutSlot::new(Panel::Stats, SizeConstraint::Fill)]),
             },
 
-            help_view: ViewLayout {
-                layout: Layout::vertical(vec![LayoutSlot::new(Panel::Help, SizeConstraint::Fill)]),
-            },
-
-            settings_view: None, // TODO: implement settings view
+            settings_view: None,
         }
     }
 
@@ -263,10 +262,6 @@ impl Preset {
                 layout: Layout::vertical(vec![LayoutSlot::new(Panel::Stats, SizeConstraint::Fill)]),
             },
 
-            help_view: ViewLayout {
-                layout: Layout::vertical(vec![LayoutSlot::new(Panel::Help, SizeConstraint::Fill)]),
-            },
-
             settings_view: None,
         }
     }
@@ -295,10 +290,6 @@ impl Preset {
 
             stats_view: ViewLayout {
                 layout: Layout::vertical(vec![LayoutSlot::new(Panel::Stats, SizeConstraint::Fill)]),
-            },
-
-            help_view: ViewLayout {
-                layout: Layout::vertical(vec![LayoutSlot::new(Panel::Help, SizeConstraint::Fill)]),
             },
 
             settings_view: None,

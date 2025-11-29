@@ -70,11 +70,14 @@ pub struct Theme {
     pub panel_logs: Color,
     pub panel_detail: Color,
 
-    // ─── Terminal Colors (new) ───────────────────────────────
+    // ─── Terminal Colors (for full theme support) ─────────────
+    #[allow(dead_code)] // Future: terminal background customization
     pub background: Color,
+    #[allow(dead_code)] // Future: terminal foreground customization
     pub foreground: Color,
 
     // ─── Source palette (for VHS export) ─────────────────────
+    #[allow(dead_code)] // Used by to_vhs_json for demo recordings
     palette: ColorPalette,
 }
 
@@ -188,11 +191,13 @@ impl Theme {
     }
 
     /// Export theme as VHS-compatible JSON
+    #[allow(dead_code)] // Used for demo recordings with VHS
     pub fn to_vhs_json(&self) -> String {
         self.palette.to_vhs_json()
     }
 
     /// Get the underlying color palette
+    #[allow(dead_code)] // Accessor for VHS export
     pub fn palette(&self) -> &ColorPalette {
         &self.palette
     }
@@ -212,13 +217,14 @@ impl Theme {
     }
 
     /// List all available themes (embedded + external)
+    #[allow(dead_code)] // Future: dynamic theme discovery
     pub fn list_available() -> Vec<String> {
         let mut themes: Vec<String> = embedded::list_embedded_themes()
             .iter()
             .map(|s| s.to_string())
             .collect();
 
-        // Add external themes
+        // Add external themes from ~/.config/anthropic-spy/themes/
         if let Some(config_dir) = dirs::home_dir() {
             let themes_dir = config_dir
                 .join(".config")
@@ -259,6 +265,7 @@ impl Default for Theme {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Write VHS theme JSON file for demo recordings
+#[allow(dead_code)] // CLI utility for VHS demo recordings
 pub fn export_vhs_theme(theme: &Theme, path: &std::path::Path) -> std::io::Result<()> {
     std::fs::write(path, theme.to_vhs_json())
 }

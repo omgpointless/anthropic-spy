@@ -42,6 +42,7 @@ pub struct SemanticTheme {
     // ─── Terminal Colors ─────────────────────────────────────
     pub background: Color,
     pub foreground: Color,
+    #[allow(dead_code)] // Future: selection highlighting
     pub selection: Color,
 }
 

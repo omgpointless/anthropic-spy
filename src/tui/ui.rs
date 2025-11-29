@@ -6,7 +6,8 @@
 
 use super::app::{App, SettingsCategory, SettingsFocus, StreamingState, View};
 use super::layout::Breakpoint;
-use super::modal::{theme_list, Modal, ThemeSelectorState};
+use super::markdown;
+use super::modal::{theme_list, Modal};
 use super::preset::{LayoutDirection, Panel};
 use super::scroll::FocusablePanel;
 use crate::events::ProxyEvent;
@@ -73,7 +74,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             View::Events => render_events_content(f, area, app),
             View::Stats => render_stats_view(f, area, app),
             View::Settings => render_settings_view(f, area, app),
-            View::Help => render_help_view(f, area, app),
         }
     }
 
@@ -625,70 +625,30 @@ fn render_preset_options(
     f.render_widget(list, area);
 }
 
-/// Render the Help view
-fn render_help_view(f: &mut Frame, area: Rect, app: &App) {
-    let content = format!(
-        r#"
-  Keyboard Shortcuts
-  ──────────────────────────────────
-
-  Navigation
-    ↑/↓, j/k    Scroll list / detail
-    Enter       Open detail view
-    Esc         Close / go back
-    Home/End    Jump to start/end
-
-  Views
-    e           Events (main view)
-    s           Statistics
-    ?           Help (this screen)
-
-  General
-    q           Quit
-
-  Mouse
-    Scroll      Navigate events
-
-  ──────────────────────────────────
-  Theme: {}
-    "#,
-        app.theme.name
-    );
-
-    let paragraph = Paragraph::new(content)
-        .style(Style::default().fg(Color::White))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(app.theme.border))
-                .title(" Help (?) ─ Press Esc to go back "),
-        );
-
-    f.render_widget(paragraph, area);
-}
-
 /// Render the thinking panel showing Claude's reasoning
 fn render_thinking_panel(f: &mut Frame, area: Rect, app: &mut App) {
     // Get thinking content: streaming (real-time) or completed
-    let thinking_content = app
-        .current_thinking_content()
-        .unwrap_or_else(|| "Waiting for thinking...".to_string());
+    let thinking_content = app.current_thinking_content();
+    let is_thinking = app.streaming_state() == StreamingState::Thinking;
 
     // Calculate content metrics for title and scrollbar
     let height = area.height.saturating_sub(2) as usize; // Account for borders
     let width = area.width.saturating_sub(2) as usize; // Account for borders
-    let text_lines = thinking_content.lines().count();
 
-    // Estimate visual lines after wrapping (rough: chars / width)
-    let estimated_visual_lines = thinking_content
-        .lines()
-        .map(|line| (line.len() / width.max(1)).max(1))
-        .sum::<usize>();
+    // Parse markdown and convert to styled lines (empty if no content)
+    let styled_lines = if let Some(ref content) = thinking_content {
+        markdown::render_markdown(content, width)
+    } else {
+        Vec::new()
+    };
+    let line_count = styled_lines.len();
+    let text_lines = thinking_content
+        .as_ref()
+        .map(|c| c.lines().count())
+        .unwrap_or(0);
 
     // Update scroll state dimensions
-    app.panels
-        .thinking
-        .update_dimensions(estimated_visual_lines, height);
+    app.panels.thinking.update_dimensions(line_count, height);
 
     // Get scroll offset from state (respects auto-follow and user scrolling)
     let scroll_offset = app.panels.thinking.offset();
@@ -700,21 +660,28 @@ fn render_thinking_panel(f: &mut Frame, area: Rect, app: &mut App) {
         ""
     };
 
-    let title = if text_lines > height {
+    // Build title - show animated dots when actively thinking
+    let title = if is_thinking {
+        format!(" 💭 Thinking{} ", app.thinking_dots())
+    } else if text_lines > height {
         format!(
             " 💭 Thinking ({} lines, ~{} tok){} ",
             text_lines, app.stats.thinking_tokens, scroll_indicator
         )
-    } else {
+    } else if app.stats.thinking_tokens > 0 {
         format!(
             " 💭 Thinking (~{} tok){} ",
             app.stats.thinking_tokens, scroll_indicator
         )
+    } else {
+        " 💭 Thinking ".to_string()
     };
 
     let focused = app.is_focused(FocusablePanel::Thinking);
     let border_color = app.theme.panel_border(FocusablePanel::Thinking, focused);
-    let paragraph = Paragraph::new(thinking_content.as_str())
+
+    // Use pre-parsed markdown lines instead of raw text
+    let paragraph = Paragraph::new(styled_lines)
         .style(Style::default().fg(Color::White))
         .block(
             Block::default()
@@ -728,14 +695,13 @@ fn render_thinking_panel(f: &mut Frame, area: Rect, app: &mut App) {
     f.render_widget(paragraph, area);
 
     // Render scrollbar if content overflows
-    if estimated_visual_lines > height {
+    if line_count > height {
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .begin_symbol(Some("↑"))
             .end_symbol(Some("↓"));
 
         let mut scrollbar_state =
-            ScrollbarState::new(estimated_visual_lines.saturating_sub(height))
-                .position(scroll_offset);
+            ScrollbarState::new(line_count.saturating_sub(height)).position(scroll_offset);
 
         f.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
     }
@@ -1572,7 +1538,7 @@ fn log_level_style(level: &LogLevel, theme: &Theme) -> Style {
 /// Render a modal dialog as a centered overlay
 fn render_modal(f: &mut Frame, modal: &Modal, app: &App) {
     match modal {
-        Modal::ThemeSelector(state) => render_theme_selector(f, state, app),
+        Modal::Help => render_help_modal(f, app),
     }
 }
 
@@ -1583,40 +1549,60 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, width.min(area.width), height.min(area.height))
 }
 
-/// Render the theme selector modal
-fn render_theme_selector(f: &mut Frame, state: &ThemeSelectorState, app: &App) {
-    // Calculate modal size: width for theme names + padding, height for list + header/footer
-    let width = 40;
-    let height = (theme_list().len() + 4) as u16; // +4 for borders, title, help text
+/// Render the help modal overlay
+fn render_help_modal(f: &mut Frame, app: &App) {
+    let content = format!(
+        r#"
+  Views
+    F1, e       Events (main view)
+    F2, s       Statistics
+    F3          Settings
 
+  Navigation
+    ↑/↓, j/k    Scroll list / detail
+    Enter       Open detail / apply
+    Esc         Close / go back
+    Home/End    Jump to start/end
+
+  Settings Navigation
+    Tab/→       Switch pane focus
+    ↑/↓         Navigate options
+    Enter       Apply selection
+
+  Events View
+    Tab         Cycle panel focus
+    Shift+Tab   Focus previous panel
+
+  General
+    ?           Toggle this help
+    q           Quit
+
+  Mouse
+    Scroll      Navigate events
+
+  ──────────────────────────────────
+  Theme: {}  |  Preset: {}
+"#,
+        app.theme.name, app.preset.name
+    );
+
+    // Calculate modal size
+    let width = 44;
+    let height = 30;
     let area = centered_rect(width, height, f.area());
 
     // Clear the area behind the modal
     f.render_widget(Clear, area);
 
-    // Build list items with selection highlight
-    let items: Vec<ListItem> = theme_list()
-        .iter()
-        .enumerate()
-        .map(|(i, &name)| {
-            let style = if i == state.selected {
-                Style::default()
-                    .fg(app.theme.highlight)
-                    .add_modifier(Modifier::BOLD | Modifier::REVERSED)
-            } else {
-                Style::default().fg(Color::White)
-            };
-            ListItem::new(format!("  {}  ", name)).style(style)
-        })
-        .collect();
+    let paragraph = Paragraph::new(content)
+        .style(Style::default().fg(Color::White))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.highlight))
+                .title(" Help ")
+                .title_bottom(Line::from(" Press ? or Esc to close ").centered()),
+        );
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(app.theme.highlight))
-            .title(" Select Theme ")
-            .title_bottom(Line::from(" ↑↓ Navigate  Enter Apply  Esc Cancel ").centered()),
-    );
-
-    f.render_widget(list, area);
+    f.render_widget(paragraph, area);
 }

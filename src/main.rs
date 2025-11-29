@@ -80,6 +80,8 @@ impl ContextState {
             85
         } else if percent >= 80.0 {
             80
+        } else if percent >= 60.0 {
+            60
         } else {
             return None; // Below warning threshold
         };
