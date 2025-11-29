@@ -12,7 +12,7 @@ use std::path::PathBuf;
 /// Version info
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Feature flags for optional modules
+/// Feature flags for optional modules (opt-out: default enabled)
 #[derive(Debug, Clone)]
 pub struct Features {
     /// Storage module: write events to JSONL files
@@ -35,6 +35,30 @@ impl Default for Features {
     }
 }
 
+/// Augmentation settings
+///
+/// Augmentations modify API responses by injecting additional content.
+/// Context warning is enabled by default as it's non-intrusive and helpful.
+#[derive(Debug, Clone)]
+pub struct Augmentation {
+    /// Context warning: inject usage alerts when context fills up
+    /// Adds styled annotations suggesting /compact when thresholds are crossed
+    pub context_warning: bool,
+
+    /// Thresholds at which to warn (percentages)
+    /// Default: [60, 80, 85, 90, 95]
+    pub context_warning_thresholds: Vec<u8>,
+}
+
+impl Default for Augmentation {
+    fn default() -> Self {
+        Self {
+            context_warning: true, // Enabled by default
+            context_warning_thresholds: vec![60, 80, 85, 90, 95],
+        }
+    }
+}
+
 /// Application configuration
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -53,7 +77,7 @@ pub struct Config {
     /// Demo mode: generate mock events for showcasing the TUI
     pub demo_mode: bool,
 
-    /// Context window limit for the gauge (empirically ~150K triggers compact)
+    /// Context window limit for the gauge (empirically ~147K triggers compact)
     pub context_limit: u64,
 
     /// Theme name: "basic", "terminal", "dracula", "monokai", "nord", "gruvbox"
@@ -64,6 +88,9 @@ pub struct Config {
 
     /// Feature flags for optional modules
     pub features: Features,
+
+    /// Augmentation settings (opt-in response modifications)
+    pub augmentation: Augmentation,
 }
 
 /// Feature flags as loaded from config file
@@ -72,6 +99,13 @@ struct FileFeatures {
     storage: Option<bool>,
     thinking_panel: Option<bool>,
     stats: Option<bool>,
+}
+
+/// Augmentation settings as loaded from config file
+#[derive(Debug, Deserialize, Default)]
+struct FileAugmentation {
+    context_warning: Option<bool>,
+    context_warning_thresholds: Option<Vec<u8>>,
 }
 
 /// Config file structure (subset of Config that makes sense to persist)
@@ -86,6 +120,9 @@ struct FileConfig {
 
     /// Optional [features] section
     features: Option<FileFeatures>,
+
+    /// Optional [augmentation] section
+    augmentation: Option<FileAugmentation>,
 }
 
 impl Config {
@@ -125,8 +162,8 @@ impl Config {
 # Set to false if you want the TUI to inherit your terminal's background
 # use_theme_background = true
 
-# Context window limit for the gauge (default: 150000)
-# context_limit = 150000
+# Context window limit for the gauge (default: 147000)
+# context_limit = 147000
 
 # Proxy bind address (default: 127.0.0.1:8080)
 # bind_addr = "127.0.0.1:8080"
@@ -134,11 +171,16 @@ impl Config {
 # Log directory for session files (default: ./logs)
 # log_dir = "./logs"
 
-# Feature flags
+# Feature flags (default: all enabled)
 # [features]
 # storage = true         # Write events to JSONL files
 # thinking_panel = true  # Show Claude's extended thinking
 # stats = true           # Track token counts and costs
+
+# Augmentation (response modifications)
+# [augmentation]
+# context_warning = true              # Inject warnings when context fills up (default: true)
+# context_warning_thresholds = [60, 80, 85, 90, 95]  # Percentages to warn at
 "#;
 
         // Write template (ignore errors - config is optional)
@@ -195,12 +237,12 @@ impl Config {
             .map(|v| v == "1" || v.to_lowercase() == "true")
             .unwrap_or(false);
 
-        // Context limit: env > file > default (150K based on empirical data)
+        // Context limit: env > file > default (147K based on empirical data)
         let context_limit = std::env::var("ANTHROPIC_SPY_CONTEXT_LIMIT")
             .ok()
             .and_then(|v| v.parse().ok())
             .or(file.context_limit)
-            .unwrap_or(150_000);
+            .unwrap_or(147_000);
 
         // Theme: env > file > default ("One Half Dark" for consistent RGB colors)
         let theme = std::env::var("ANTHROPIC_SPY_THEME")
@@ -212,11 +254,22 @@ impl Config {
         let use_theme_background = file.use_theme_background.unwrap_or(true);
 
         // Feature flags: file config only (env vars would be verbose)
+        // Default: enabled (opt-out pattern)
         let file_features = file.features.unwrap_or_default();
         let features = Features {
             storage: file_features.storage.unwrap_or(true),
             thinking_panel: file_features.thinking_panel.unwrap_or(true),
             stats: file_features.stats.unwrap_or(true),
+        };
+
+        // Augmentation settings: file config only
+        // Default: enabled (context warning is helpful and non-intrusive)
+        let file_augmentation = file.augmentation.unwrap_or_default();
+        let augmentation = Augmentation {
+            context_warning: file_augmentation.context_warning.unwrap_or(true),
+            context_warning_thresholds: file_augmentation
+                .context_warning_thresholds
+                .unwrap_or_else(|| vec![60, 80, 85, 90, 95]),
         };
 
         Self {
@@ -229,6 +282,7 @@ impl Config {
             theme,
             use_theme_background,
             features,
+            augmentation,
         }
     }
 }
@@ -241,10 +295,11 @@ impl Default for Config {
             log_dir: PathBuf::from("./logs"),
             enable_tui: true,
             demo_mode: false,
-            context_limit: 150_000,
+            context_limit: 147_000,
             theme: "One Half Dark".to_string(),
             use_theme_background: true,
             features: Features::default(),
+            augmentation: Augmentation::default(),
         }
     }
 }

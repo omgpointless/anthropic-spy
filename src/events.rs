@@ -135,7 +135,7 @@ pub struct Stats {
     pub last_cached_tokens: u64,
     /// Number of context compacts detected this session
     pub compact_count: usize,
-    /// Configured context limit (from config file, default 150K)
+    /// Configured context limit (from config file, default 147K)
     pub configured_context_limit: u64,
 
     // Thinking block tracking
@@ -266,7 +266,7 @@ impl Stats {
         if self.configured_context_limit > 0 {
             self.configured_context_limit
         } else {
-            150_000 // Default fallback
+            147_000 // Default fallback
         }
     }
 }

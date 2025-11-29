@@ -8,13 +8,16 @@
 // while accumulating a copy for parsing. This ensures low latency for
 // Claude Code while maintaining full observability.
 
-pub mod interceptor;
+pub mod augmentation;
+pub mod sse;
 
 use crate::config::Config;
 use crate::events::{generate_id, ProxyEvent};
 use crate::parser::models::CapturedHeaders;
 use crate::parser::Parser;
 use crate::{SharedContextState, StreamingThinking};
+use augmentation::{AugmentationContext, AugmentationPipeline, StopReason};
+use std::sync::Arc;
 use anyhow::{Context, Result};
 use axum::{
     body::Body,
@@ -52,8 +55,10 @@ pub struct ProxyState {
     api_url: String,
     /// Shared buffer for streaming thinking content to TUI
     streaming_thinking: StreamingThinking,
-    /// Shared context state for interceptor injection
+    /// Shared context state for augmentation
     context_state: SharedContextState,
+    /// Augmentation pipeline for response modification
+    augmentation: Arc<AugmentationPipeline>,
 }
 
 /// Context for handling an API response
@@ -87,6 +92,17 @@ pub async fn start_proxy(
         .build()
         .context("Failed to create HTTP client")?;
 
+    // Create augmentation pipeline from config (opt-in augmenters)
+    let augmentation = Arc::new(AugmentationPipeline::from_config(&config.augmentation));
+    if augmentation.is_empty() {
+        tracing::debug!("Augmentation pipeline: no augmenters enabled");
+    } else {
+        tracing::debug!(
+            "Augmentation pipeline initialized with: {:?}",
+            augmentation.augmenter_names()
+        );
+    }
+
     let state = ProxyState {
         client,
         parser: Parser::new(),
@@ -95,6 +111,7 @@ pub async fn start_proxy(
         api_url,
         streaming_thinking,
         context_state,
+        augmentation,
     };
 
     // Build the router - all requests go to the proxy handler
@@ -129,97 +146,6 @@ impl ProxyState {
     async fn send_event(&self, event: ProxyEvent) {
         let _ = self.event_tx_tui.send(event.clone()).await;
         let _ = self.event_tx_storage.send(event).await;
-    }
-}
-
-/// Check if response is SSE based on content-type header
-fn is_sse_response(headers: &reqwest::header::HeaderMap) -> bool {
-    headers
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .map(|ct| ct.contains("text/event-stream"))
-        .unwrap_or(false)
-}
-
-/// Parse SSE response into a JSON representation for display
-fn parse_sse_to_json(body: &str) -> Option<serde_json::Value> {
-    use serde_json::json;
-
-    let mut content_blocks = Vec::new();
-    let mut model = String::new();
-    let mut stop_reason: Option<String> = None;
-    let mut usage_data: Option<serde_json::Value> = None;
-
-    for line in body.lines() {
-        let line = line.trim();
-
-        if line.starts_with("data:") {
-            let json_str = line.strip_prefix("data:").unwrap_or("").trim();
-
-            if json_str.is_empty() || json_str == "[DONE]" {
-                continue;
-            }
-
-            if let Ok(data) = serde_json::from_str::<serde_json::Value>(json_str) {
-                let event_type = data.get("type").and_then(|v| v.as_str()).unwrap_or("");
-
-                match event_type {
-                    "message_start" => {
-                        if let Some(message) = data.get("message") {
-                            model = message
-                                .get("model")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_string();
-                        }
-                    }
-                    "content_block_start" => {
-                        if let Some(block) = data.get("content_block") {
-                            content_blocks.push(block.clone());
-                        }
-                    }
-                    "content_block_delta" => {
-                        if let Some(delta) = data.get("delta") {
-                            if let Some(last_block) = content_blocks.last_mut() {
-                                if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
-                                    if let Some(existing_text) = last_block.get_mut("text") {
-                                        if let Some(s) = existing_text.as_str() {
-                                            *existing_text = json!(format!("{}{}", s, text));
-                                        }
-                                    } else if let Some(obj) = last_block.as_object_mut() {
-                                        obj.insert("text".to_string(), json!(text));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    "message_delta" => {
-                        if let Some(delta) = data.get("delta") {
-                            stop_reason = delta
-                                .get("stop_reason")
-                                .and_then(|v| v.as_str())
-                                .map(String::from);
-                        }
-                        if let Some(usage) = data.get("usage") {
-                            usage_data = Some(usage.clone());
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    if !content_blocks.is_empty() || !model.is_empty() {
-        Some(json!({
-            "model": model,
-            "content": content_blocks,
-            "stop_reason": stop_reason,
-            "usage": usage_data,
-            "_note": "Assembled from SSE stream"
-        }))
-    } else {
-        None
     }
 }
 
@@ -364,7 +290,7 @@ async fn proxy_handler(
     };
 
     // Decide: streaming (SSE) or buffered (JSON) response handling
-    if is_sse_response(&ctx.headers) && ctx.status.is_success() {
+    if sse::is_sse_response(&ctx.headers) && ctx.status.is_success() {
         tracing::debug!("Handling SSE streaming response");
         handle_streaming_response(ctx).await
     } else {
@@ -396,6 +322,7 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
     let request_id_clone = request_id.clone();
     let streaming_thinking = state.streaming_thinking.clone();
     let context_state = state.context_state.clone();
+    let augmentation = state.augmentation.clone();
 
     // Spawn task to stream response while accumulating
     tokio::spawn(async move {
@@ -428,23 +355,23 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                             while let Some(newline_pos) = line_buffer.find('\n') {
                                 let line = line_buffer[..newline_pos].trim();
                                 // Register tool_use IDs immediately
-                                if let Some(tool_info) = extract_tool_use_from_sse_line(line) {
+                                if let Some(tool_info) = sse::extract_tool_use(line) {
                                     parser.register_pending_tool(tool_info.0, tool_info.1).await;
                                 }
                                 // Track content block index for injection
-                                if let Some(idx) = extract_content_block_index(line) {
+                                if let Some(idx) = sse::extract_content_block_index(line) {
                                     if idx >= max_block_index {
                                         max_block_index = idx + 1;
                                     }
                                 }
                                 // Extract model from message_start (for injection filtering)
                                 if response_model.is_empty() {
-                                    if let Some(model) = extract_model_from_sse_line(line) {
+                                    if let Some(model) = sse::extract_model(line) {
                                         response_model = model;
                                     }
                                 }
                                 // Emit ThinkingStarted immediately for real-time feedback
-                                if is_thinking_block_start(line) {
+                                if sse::is_thinking_block_start(line) {
                                     // Clear buffer for new thinking block
                                     if let Ok(mut buf) = streaming_thinking.lock() {
                                         buf.clear();
@@ -456,7 +383,7 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                                         .await;
                                 }
                                 // Stream thinking content in real-time
-                                if let Some(thinking_text) = extract_thinking_delta(line) {
+                                if let Some(thinking_text) = sse::extract_thinking_delta(line) {
                                     if let Ok(mut buf) = streaming_thinking.lock() {
                                         buf.push_str(&thinking_text);
                                     }
@@ -476,48 +403,23 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                                     );
                                 }
                                 Ok(chunk_str) => {
+                                    // Check for message_delta to trigger augmentation
                                     if chunk_str.contains("message_delta") {
-                                        // Parse stop_reason to decide if we should inject
-                                        let is_end_turn = chunk_str
-                                            .contains("\"stop_reason\":\"end_turn\"")
-                                            || chunk_str.contains("\"stop_reason\": \"end_turn\"");
-                                        let is_tool_use = chunk_str
-                                            .contains("\"stop_reason\":\"tool_use\"")
-                                            || chunk_str.contains("\"stop_reason\": \"tool_use\"");
+                                        if let Some(stop_reason) = StopReason::from_chunk(chunk_str)
+                                        {
+                                            // Build augmentation context
+                                            let aug_ctx = AugmentationContext {
+                                                model: &response_model,
+                                                stop_reason,
+                                                next_block_index: max_block_index,
+                                                context_state: &context_state,
+                                            };
 
-                                        // Skip injection on Haiku utility calls (topic gen, etc.)
-                                        let is_haiku =
-                                            response_model.to_lowercase().contains("haiku");
-
-                                        if is_tool_use {
-                                            tracing::debug!(
-                                                "SSE: tool_use response, skipping injection"
-                                            );
-                                        } else if is_haiku {
-                                            tracing::debug!(
-                                                "SSE: Haiku response ({}), skipping injection",
-                                                response_model
-                                            );
-                                        } else if is_end_turn {
-                                            // Safe to inject on main conversation response
-                                            if let Some(injection) =
-                                                interceptor::maybe_generate_sse_injection(
-                                                    &context_state,
-                                                    max_block_index,
-                                                )
+                                            // Run augmentation pipeline
+                                            if let Some(injection) = augmentation.process(&aug_ctx)
                                             {
-                                                tracing::debug!(
-                                                "SSE: injecting context warning at block index {} (model: {})",
-                                                max_block_index,
-                                                response_model
-                                            );
                                                 let _ = tx.send(Ok(Bytes::from(injection))).await;
                                                 injected = true;
-                                            } else {
-                                                tracing::debug!(
-                                                    "SSE: end_turn (model: {}), threshold not met",
-                                                    response_model
-                                                );
                                             }
                                         }
                                     }
@@ -565,7 +467,7 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
         }
         // Process any remaining data in line buffer
         if is_messages_endpoint && !line_buffer.is_empty() {
-            if let Some(tool_info) = extract_tool_use_from_sse_line(line_buffer.trim()) {
+            if let Some(tool_info) = sse::extract_tool_use(line_buffer.trim()) {
                 parser.register_pending_tool(tool_info.0, tool_info.1).await;
             }
         }
@@ -586,7 +488,7 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
         // Parse accumulated response for display
         let parsed_body = if is_messages_endpoint {
             let body_str = std::str::from_utf8(&accumulated).unwrap_or("");
-            parse_sse_to_json(body_str)
+            sse::assemble_to_json(body_str)
         } else {
             None
         };
@@ -686,7 +588,7 @@ async fn handle_buffered_response(ctx: ResponseContext) -> Result<Response<Body>
         } else {
             let body_str = std::str::from_utf8(&response_body).unwrap_or("");
             if body_str.contains("event:") {
-                parse_sse_to_json(body_str)
+                sse::assemble_to_json(body_str)
             } else {
                 None
             }
@@ -823,141 +725,6 @@ fn extract_response_headers(headers: &reqwest::header::HeaderMap) -> CapturedHea
     }
 
     captured
-}
-
-/// Extract tool_use ID and name from an SSE data line if it's a content_block_start for tool_use
-///
-/// This is used during streaming to register tool_use IDs immediately, before the stream
-/// completes. This prevents a race condition where the next request (with tool_result)
-/// arrives before we've finished parsing the response.
-///
-/// Returns Some((id, name)) if this line starts a tool_use block, None otherwise.
-fn extract_tool_use_from_sse_line(line: &str) -> Option<(String, String)> {
-    // Only process "data:" lines
-    let json_str = line.strip_prefix("data:")?.trim();
-    if json_str.is_empty() || json_str == "[DONE]" {
-        return None;
-    }
-
-    // Parse the JSON
-    let data: serde_json::Value = serde_json::from_str(json_str).ok()?;
-
-    // Check if this is a content_block_start event
-    let event_type = data.get("type")?.as_str()?;
-    if event_type != "content_block_start" {
-        return None;
-    }
-
-    // Check if the content_block is a tool_use
-    let content_block = data.get("content_block")?;
-    let block_type = content_block.get("type")?.as_str()?;
-    if block_type != "tool_use" {
-        return None;
-    }
-
-    // Extract ID and name
-    let id = content_block.get("id")?.as_str()?.to_string();
-    let name = content_block.get("name")?.as_str()?.to_string();
-
-    Some((id, name))
-}
-
-/// Check if an SSE line indicates the start of a thinking block
-/// Used for real-time "Thinking..." feedback before the full block arrives
-fn is_thinking_block_start(line: &str) -> bool {
-    let Some(json_str) = line.strip_prefix("data:") else {
-        return false;
-    };
-    let json_str = json_str.trim();
-    if json_str.is_empty() || json_str == "[DONE]" {
-        return false;
-    }
-
-    let Ok(data) = serde_json::from_str::<serde_json::Value>(json_str) else {
-        return false;
-    };
-
-    // Check for content_block_start with type "thinking"
-    let event_type = data.get("type").and_then(|v| v.as_str()).unwrap_or("");
-    if event_type != "content_block_start" {
-        return false;
-    }
-
-    data.get("content_block")
-        .and_then(|b| b.get("type"))
-        .and_then(|t| t.as_str())
-        .map(|t| t == "thinking")
-        .unwrap_or(false)
-}
-
-/// Extract thinking text from a thinking_delta SSE event
-/// Returns Some(text) if this is a thinking delta, None otherwise
-fn extract_thinking_delta(line: &str) -> Option<String> {
-    let json_str = line.strip_prefix("data:")?.trim();
-    if json_str.is_empty() || json_str == "[DONE]" {
-        return None;
-    }
-
-    let data: serde_json::Value = serde_json::from_str(json_str).ok()?;
-
-    // Check for content_block_delta event
-    let event_type = data.get("type")?.as_str()?;
-    if event_type != "content_block_delta" {
-        return None;
-    }
-
-    // Check if delta type is thinking_delta
-    let delta = data.get("delta")?;
-    let delta_type = delta.get("type")?.as_str()?;
-    if delta_type != "thinking_delta" {
-        return None;
-    }
-
-    // Extract the thinking text
-    delta.get("thinking")?.as_str().map(String::from)
-}
-
-/// Extract content block index from SSE content_block_start event
-/// Used to track the highest block index for annotation injection
-fn extract_content_block_index(line: &str) -> Option<u32> {
-    let json_str = line.strip_prefix("data:")?.trim();
-    if json_str.is_empty() || json_str == "[DONE]" {
-        return None;
-    }
-
-    let data: serde_json::Value = serde_json::from_str(json_str).ok()?;
-
-    // Check for content_block_start event
-    let event_type = data.get("type")?.as_str()?;
-    if event_type != "content_block_start" {
-        return None;
-    }
-
-    // Extract the index
-    data.get("index")?.as_u64().map(|i| i as u32)
-}
-
-/// Extract model name from SSE message_start event
-/// Returns Some(model_string) if this is a message_start with a model field
-fn extract_model_from_sse_line(line: &str) -> Option<String> {
-    let json_str = line.strip_prefix("data:")?.trim();
-    if json_str.is_empty() || json_str == "[DONE]" {
-        return None;
-    }
-
-    let data: serde_json::Value = serde_json::from_str(json_str).ok()?;
-
-    // Check for message_start event
-    let event_type = data.get("type")?.as_str()?;
-    if event_type != "message_start" {
-        return None;
-    }
-
-    // Extract model from message_start.message.model
-    data.get("message")?
-        .get("model")?
-        .as_str()
-        .map(String::from)
 }
 
 /// Errors that can occur during proxying

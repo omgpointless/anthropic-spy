@@ -10,6 +10,7 @@
 // - Storage: Writes events to JSON Lines files for later analysis
 // - Event system: mpsc channels connect all components
 
+mod cli;
 mod config;
 mod demo;
 mod events;
@@ -66,31 +67,29 @@ impl ContextState {
         (self.current_tokens as f64 / self.limit as f64) * 100.0
     }
 
-    /// Check if we should warn at current level
+    /// Check if we should warn at current level with configurable thresholds
+    /// Returns Some(threshold) if we should warn, None if already warned or below thresholds
+    pub fn should_warn_at(&self, thresholds: &[u8]) -> Option<u8> {
+        let percent = self.usage_percent() as u8;
+
+        // Find the highest threshold we've crossed
+        // Thresholds should be sorted ascending: [60, 80, 85, 90, 95]
+        let threshold = thresholds
+            .iter()
+            .rev() // Check highest first
+            .find(|&&t| percent >= t)?;
+
+        // Check if we already warned at this level or higher
+        match self.last_warned_threshold {
+            Some(last) if last >= *threshold => None, // Already warned
+            _ => Some(*threshold),
+        }
+    }
+
+    /// Check if we should warn at current level (default thresholds)
     /// Returns Some(threshold) if we should warn, None if already warned at this level
     pub fn should_warn(&self) -> Option<u8> {
-        let percent = self.usage_percent();
-
-        // Determine current threshold bucket (warn when context is getting full)
-        let threshold = if percent >= 95.0 {
-            95
-        } else if percent >= 90.0 {
-            90
-        } else if percent >= 85.0 {
-            85
-        } else if percent >= 80.0 {
-            80
-        } else if percent >= 60.0 {
-            60
-        } else {
-            return None; // Below warning threshold
-        };
-
-        // Check if we already warned at this level
-        match self.last_warned_threshold {
-            Some(last) if last >= threshold => None, // Already warned
-            _ => Some(threshold),
-        }
+        self.should_warn_at(&[60, 80, 85, 90, 95])
     }
 
     /// Update context tokens (called by parser on ApiUsage)
@@ -128,6 +127,12 @@ fn generate_session_id() -> String {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Handle CLI commands first (config --show, --reset, --edit, --update)
+    // If a command was handled, exit early
+    if cli::handle_cli() {
+        return Ok(());
+    }
+
     // Ensure config template exists (helps users discover options)
     Config::ensure_config_exists();
 

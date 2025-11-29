@@ -5,7 +5,7 @@
 // - Configuration loaded from file
 // - Module loading status with checkmarks
 
-use crate::config::{Config, Features, VERSION};
+use crate::config::{Augmentation, Config, Features, VERSION};
 
 /// ANSI color codes for terminal output
 mod colors {
@@ -75,7 +75,11 @@ fn get_module_status(config: &Config) -> Vec<ModuleStatus> {
         stats,
     } = &config.features;
 
-    vec![
+    let Augmentation {
+        context_warning, ..
+    } = &config.augmentation;
+
+    let mut modules = vec![
         ModuleStatus {
             name: "proxy",
             enabled: true, // Core, always on
@@ -106,7 +110,18 @@ fn get_module_status(config: &Config) -> Vec<ModuleStatus> {
             enabled: *stats,
             description: "Token tracking",
         },
-    ]
+    ];
+
+    // Opt-in augmentations: only show when enabled
+    if *context_warning {
+        modules.push(ModuleStatus {
+            name: "ctx-warn",
+            enabled: true,
+            description: "Context warnings",
+        });
+    }
+
+    modules
 }
 
 /// Print a single module's status
