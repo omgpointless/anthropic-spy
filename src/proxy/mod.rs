@@ -256,7 +256,11 @@ struct ClientRouting {
 /// Examples:
 ///   /dev-1/v1/messages -> client_id="dev-1", api_path="/v1/messages"
 ///   /v1/messages -> client_id=None, api_path="/v1/messages"
-fn extract_client_routing(path: &str, clients: &ClientsConfig, default_api_url: &str) -> ClientRouting {
+fn extract_client_routing(
+    path: &str,
+    clients: &ClientsConfig,
+    default_api_url: &str,
+) -> ClientRouting {
     // Only try client routing if clients are configured
     if !clients.is_configured() {
         return ClientRouting {
