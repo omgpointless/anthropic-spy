@@ -1,6 +1,6 @@
 # Multi-Client Routing & Session Tracking
 
-anthropic-spy supports tracking multiple Claude Code instances through a single proxy using **named client routing**. Each client is identified by a configured ID and routed to its designated provider backend.
+Aspy supports tracking multiple Claude Code instances through a single proxy using **named client routing**. Each client is identified by a configured ID and routed to its designated provider backend.
 
 ## Client Routing Model
 
@@ -14,7 +14,7 @@ anthropic-spy supports tracking multiple Claude Code instances through a single 
 
 ## Configuration
 
-Configuration lives at `~/.config/anthropic-spy/config.toml`.
+Configuration lives at `~/.config/aspy/config.toml`.
 
 ### Defining Clients
 

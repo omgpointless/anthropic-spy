@@ -97,13 +97,13 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:8080/dev-1
 claude
 ```
 
-The client ID (`dev-1` in these examples) must be configured in `~/.config/anthropic-spy/config.toml`. See [sessions.md](sessions.md) for configuration details.
+The client ID (`dev-1` in these examples) must be configured in `~/.config/aspy/config.toml`. See [sessions.md](sessions.md) for configuration details.
 
 ## Configuration
 
 ### Config File
 
-The primary configuration is in `~/.config/anthropic-spy/config.toml`:
+The primary configuration is in `~/.config/aspy/config.toml`:
 
 ```toml
 # Proxy settings

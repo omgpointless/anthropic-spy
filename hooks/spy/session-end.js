@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * SessionEnd hook: Notify anthropic-spy proxy that session ended
+ * SessionEnd hook: Notify aspy proxy that session ended
  *
  * Called when Claude Code session ends (quit, clear, logout, etc).
  * Archives the session in the proxy for history tracking.

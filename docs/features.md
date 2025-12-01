@@ -56,7 +56,7 @@ context_warning_thresholds = [60, 80, 85, 90, 95]
 - Tokyo Night, Synthwave '84
 - And many more...
 
-**Custom themes:** Drop a `.toml` file in `~/.config/anthropic-spy/themes/` with your colors.
+**Custom themes:** Drop a `.toml` file in `~/.config/aspy/themes/` with your colors.
 
 Press `F3` for Settings, navigate to theme, press `Enter` to apply. Changes persist to config.
 

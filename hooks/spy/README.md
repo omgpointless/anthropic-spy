@@ -7,7 +7,7 @@ This directory contains Claude Code hooks for the aspy plugin. All hooks are wri
 ### `session-start.js` - Session Registration
 
 **Trigger:** SessionStart (startup, resume, clear, compact)
-**Action:** Registers the session with anthropic-spy proxy for tracking
+**Action:** Registers the session with aspy proxy for tracking
 **Timeout:** 10 seconds
 
 When Claude Code starts a session:
@@ -89,4 +89,4 @@ echo '{"name":"Write","input":{"file_path":"src/main.rs"}}' | \
 ## Resources
 
 - [Claude Code Hooks Guide](https://docs.anthropic.com/en/docs/claude-code/hooks)
-- [anthropic-spy README](../../README.md)
+- [aspy README](../../README.md)

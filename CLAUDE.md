@@ -147,11 +147,11 @@ TUI       Storage    (Future consumers)
 
 ### Multi-Client Routing
 
-anthropic-spy supports tracking multiple Claude Code instances through a single proxy using **named client routing**. Clients are configured in `~/.config/anthropic-spy/config.toml` and connect via URL paths like `http://localhost:8080/<client-id>`.
+Aspy supports tracking multiple Claude Code instances through a single proxy using **named client routing**. Clients are configured in `~/.config/aspy/config.toml` and connect via URL paths like `http://localhost:8080/<client-id>`.
 
 **Quick Setup:**
 ```toml
-# ~/.config/anthropic-spy/config.toml
+# ~/.config/aspy/config.toml
 [clients.dev-1]
 name = "Dev Laptop"
 provider = "anthropic"

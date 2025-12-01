@@ -5,8 +5,8 @@
 // - Grep/search with standard tools
 // - Parse with jq or other JSON tools
 //
-// Each session gets its own log file: anthropic-spy-YYYYMMDD-HHMMSS-XXXX.jsonl
-// Example: jq '.tool_name' logs/anthropic-spy-20251127-143022-a7b3.jsonl
+// Each session gets its own log file: aspy-YYYYMMDD-HHMMSS-XXXX.jsonl
+// Example: jq '.tool_name' logs/aspy-20251127-143022-a7b3.jsonl
 
 use crate::events::ProxyEvent;
 use anyhow::{Context, Result};
@@ -41,10 +41,10 @@ impl Storage {
     }
 
     /// Get the path to this session's log file
-    /// Format: anthropic-spy-YYYYMMDD-HHMMSS-XXXX.jsonl
+    /// Format: aspy-YYYYMMDD-HHMMSS-XXXX.jsonl
     fn log_file_path(&self) -> PathBuf {
         self.log_dir
-            .join(format!("anthropic-spy-{}.jsonl", self.session_id))
+            .join(format!("aspy-{}.jsonl", self.session_id))
     }
 
     /// Run the storage loop, writing events to disk as they arrive

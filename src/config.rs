@@ -2,7 +2,7 @@
 //
 // Configuration is loaded in order of precedence:
 // 1. Environment variables (highest priority)
-// 2. Config file (~/.config/anthropic-spy/config.toml)
+// 2. Config file (~/.config/aspy/config.toml)
 // 3. Built-in defaults (lowest priority)
 
 use serde::Deserialize;
@@ -260,10 +260,10 @@ struct FileConfig {
 }
 
 impl Config {
-    /// Get the config file path: ~/.config/anthropic-spy/config.toml
+    /// Get the config file path: ~/.config/aspy/config.toml
     /// Uses Unix-style ~/.config on all platforms for consistency
     pub fn config_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|p| p.join(".config").join("anthropic-spy").join("config.toml"))
+        dirs::home_dir().map(|p| p.join(".config").join("aspy").join("config.toml"))
     }
 
     /// Create config file with defaults if it doesn't exist
@@ -310,7 +310,7 @@ impl Config {
     /// Serialize config to TOML string (single source of truth for format)
     pub fn to_toml(&self) -> String {
         format!(
-            r#"# anthropic-spy configuration
+            r#"# aspy configuration
 
 # Theme: Spy Dark, Spy Light, One Half Dark, Dracula, Nord, Gruvbox Dark, Monokai Pro, etc.
 # See full list in the theme selector (press 't' in the TUI)

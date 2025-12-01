@@ -104,12 +104,12 @@ use_theme_background = false
 
 ## Creating Custom Themes
 
-Themes are defined in TOML format. Custom themes live in `~/.config/anthropic-spy/themes/`.
+Themes are defined in TOML format. Custom themes live in `~/.config/aspy/themes/`.
 
 ### Theme File Structure
 
 ```toml
-# ~/.config/anthropic-spy/themes/My_Custom_Theme.toml
+# ~/.config/aspy/themes/My_Custom_Theme.toml
 
 [meta]
 name = "My Custom Theme"
@@ -201,14 +201,14 @@ The `border_type` option accepts:
 
 When loading a theme, anthropic-spy checks in order:
 
-1. **External TOML** - `~/.config/anthropic-spy/themes/{theme_name}.toml`
+1. **External TOML** - `~/.config/aspy/themes/{theme_name}.toml`
 2. **Bundled TOML** - Compiled into the binary
 3. **Legacy JSON** - For backwards compatibility
 4. **Hardcoded fallback** - One Half Dark
 
 ## Theme Extraction
 
-Bundled themes are automatically extracted to `~/.config/anthropic-spy/themes/` on first run. This allows you to:
+Bundled themes are automatically extracted to `~/.config/aspy/themes/` on first run. This allows you to:
 
 - Modify bundled themes to your preference
 - Use them as templates for custom themes
@@ -226,7 +226,7 @@ The extraction only happens once (tracked by `.extracted_v2` marker file).
 
 ### Customizing Existing Themes
 
-1. Find the theme in `~/.config/anthropic-spy/themes/`
+1. Find the theme in `~/.config/aspy/themes/`
 2. Edit the TOML file
 3. Restart anthropic-spy or press `t` to reload themes
 

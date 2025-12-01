@@ -29,7 +29,7 @@ Initial stable release with full observability features.
 - **Runtime Switching** - Change themes via Settings view or config
 
 ### Configuration
-- **Config File** - `~/.config/anthropic-spy/config.toml`
+- **Config File** - `~/.config/aspy/config.toml`
 - **CLI Tool** - `aspy config` with --init, --show, --edit, --update, --reset
 - **Multi-Client Routing** - Track multiple Claude Code instances with named clients
 - **Provider Backends** - Route to Anthropic, Foundry, Bedrock, etc.

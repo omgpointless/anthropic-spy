@@ -40,7 +40,7 @@ The codebase is organized into three conceptual layers, similar to operating sys
 - **Characteristics:** Completely external, user brings their own
 - **Config Toggle:** Yes (enable/disable at will)
 - **Dependencies:** Interacts via public APIs only
-- **Examples:** Custom theme JSON files, `.config/anthropic-spy/config.toml`
+- **Examples:** Custom theme JSON files, `.config/aspy/config.toml`
 
 **Decision Tree:**
 - Can the app function without this feature? **No** → Kernel | **Yes** → Userland

@@ -16,7 +16,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  BINARY_NAME: anthropic-spy
+  BINARY_NAME: aspy
 
 jobs:
   # Build binaries for each platform
@@ -31,26 +31,26 @@ jobs:
           # Windows x64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: anthropic-spy.exe
-            asset_name: anthropic-spy-windows-x64.exe
+            artifact_name: aspy.exe
+            asset_name: aspy-windows-x64.exe
 
           # Linux x64 (glibc)
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact_name: anthropic-spy
-            asset_name: anthropic-spy-linux-x64
+            artifact_name: aspy
+            asset_name: aspy-linux-x64
 
           # macOS Intel
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact_name: anthropic-spy
-            asset_name: anthropic-spy-macos-x64
+            artifact_name: aspy
+            asset_name: aspy-macos-x64
 
           # macOS Apple Silicon
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact_name: anthropic-spy
-            asset_name: anthropic-spy-macos-arm64
+            artifact_name: aspy
+            asset_name: aspy-macos-arm64
 
     steps:
       - name: Checkout repository
@@ -129,19 +129,19 @@ jobs:
 
           | Platform | Binary |
           |----------|--------|
-          | Windows x64 | `anthropic-spy-windows-x64.exe` |
-          | Linux x64 | `anthropic-spy-linux-x64` |
-          | macOS Intel | `anthropic-spy-macos-x64` |
-          | macOS Apple Silicon | `anthropic-spy-macos-arm64` |
+          | Windows x64 | `aspy-windows-x64.exe` |
+          | Linux x64 | `aspy-linux-x64` |
+          | macOS Intel | `aspy-macos-x64` |
+          | macOS Apple Silicon | `aspy-macos-arm64` |
 
           ### Quick Start
 
           ```bash
           # Make binary executable (macOS/Linux)
-          chmod +x anthropic-spy-*
+          chmod +x aspy-*
 
           # Run the proxy
-          ./anthropic-spy
+          ./aspy
 
           # In another terminal, point Claude Code at the proxy
           export ANTHROPIC_BASE_URL=http://127.0.0.1:8080
@@ -152,7 +152,7 @@ jobs:
 
           ```powershell
           # Run the proxy
-          .\anthropic-spy-windows-x64.exe
+          .\aspy-windows-x64.exe
 
           # In another terminal
           $env:ANTHROPIC_BASE_URL="http://127.0.0.1:8080"
@@ -175,7 +175,7 @@ jobs:
             --title "v${{ steps.version.outputs.VERSION }}" \
             --notes-file release_notes.md \
             $PRERELEASE \
-            artifacts/anthropic-spy-windows-x64.exe/anthropic-spy-windows-x64.exe \
-            artifacts/anthropic-spy-linux-x64/anthropic-spy-linux-x64 \
-            artifacts/anthropic-spy-macos-x64/anthropic-spy-macos-x64 \
-            artifacts/anthropic-spy-macos-arm64/anthropic-spy-macos-arm64
+            artifacts/aspy-windows-x64.exe/aspy-windows-x64.exe \
+            artifacts/aspy-linux-x64/aspy-linux-x64 \
+            artifacts/aspy-macos-x64/aspy-macos-x64 \
+            artifacts/aspy-macos-arm64/aspy-macos-arm64

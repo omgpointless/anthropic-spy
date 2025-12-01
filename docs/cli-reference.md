@@ -28,7 +28,7 @@ Launches an interactive setup wizard that guides you through:
 2. **Proxy settings** - Configure bind address
 3. **Features** - Enable/disable storage, thinking panel, stats
 
-The wizard creates `~/.config/anthropic-spy/config.toml` with your choices.
+The wizard creates `~/.config/aspy/config.toml` with your choices.
 
 ### Show Configuration
 
@@ -60,7 +60,7 @@ stats = true
 context_warning = true
 context_warning_thresholds = [60, 80, 85, 90, 95]
 
-# Source: /home/user/.config/anthropic-spy/config.toml
+# Source: /home/user/.config/aspy/config.toml
 ```
 
 ### Edit Configuration
@@ -103,12 +103,12 @@ aspy config --path
 
 Prints the config file path:
 ```
-/home/user/.config/anthropic-spy/config.toml
+/home/user/.config/aspy/config.toml
 ```
 
 ## Configuration File Format
 
-Location: `~/.config/anthropic-spy/config.toml`
+Location: `~/.config/aspy/config.toml`
 
 ```toml
 # Theme (use 't' in TUI to see all options)

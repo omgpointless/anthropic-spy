@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * SessionStart hook: Register session with anthropic-spy proxy
+ * SessionStart hook: Register session with aspy proxy
  *
  * Called when Claude Code starts a new session. Sends session info to the
  * proxy so it can track sessions per-user and provide filtered stats.
@@ -67,7 +67,7 @@ async function main() {
         console.log(JSON.stringify({
           hookSpecificOutput: {
             hookEventName: 'SessionStart',
-            additionalContext: `Session tracked by anthropic-spy (user: ${userId.slice(0, 8)})`,
+            additionalContext: `Session tracked by aspy (user: ${userId.slice(0, 8)})`,
           },
         }));
       }

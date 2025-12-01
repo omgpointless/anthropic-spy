@@ -43,7 +43,7 @@ paste relevant log lines here
 - **OS**: [e.g., Windows 11, macOS 14, Ubuntu 22.04]
 - **Terminal**: [e.g., Windows Terminal, iTerm2, Alacritty]
 - **Rust version**: [output of `rustc --version`]
-- **anthropic-spy version**: [e.g., 0.1.0-alpha or commit hash]
+- **aspy version**: [e.g., 0.1.0-alpha or commit hash]
 - **How installed**: [pre-built binary / built from source]
 
 ## Additional Context

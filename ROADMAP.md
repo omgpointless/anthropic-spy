@@ -42,7 +42,7 @@ A living document capturing the vision and planned iterations for anthropic-spy.
 - [x] Runtime theme switching
 
 **Configuration:**
-- [x] Config file support (`~/.config/anthropic-spy/config.toml`)
+- [x] Config file support (`~/.config/aspy/config.toml`)
 - [x] CLI config management (`--init`, `--show`, `--edit`, `--update`, `--reset`)
 - [x] Multi-client routing with named clients
 - [x] Provider backend configuration
