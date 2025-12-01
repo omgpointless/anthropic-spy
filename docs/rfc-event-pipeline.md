@@ -1,6 +1,6 @@
 # RFC: Event Pipeline & Lifestats Storage
 
-**Status:** Draft (Revised after peer review)
+**Status:** Draft (v3 - Final review pass)
 **Author:** Claude (with human direction)
 **Created:** 2025-12-01
 **Revised:** 2025-12-01
@@ -121,35 +121,48 @@ ProxyEvent
 //!
 //! Processors can perform three operations:
 //! - **Filter**: Drop events (return `ProcessResult::Drop`)
-//! - **Transform**: Modify events (return `ProcessResult::Continue(modified)`)
-//! - **Side-effect**: React to events without modification (metrics, storage)
+//! - **Transform**: Modify events (return `ProcessResult::Transform(modified)`)
+//! - **Side-effect**: React to events without modification (return `ProcessResult::Continue`)
 
 use crate::events::ProxyEvent;
+use std::borrow::Cow;
 use std::sync::Arc;
 
 /// Result of processing an event
 #[derive(Debug)]
 pub enum ProcessResult {
-    /// Event should continue through pipeline (possibly modified)
-    Continue(ProxyEvent),
+    /// Event continues unchanged (side-effect only processor)
+    Continue,
+    /// Event was transformed - use this new version
+    Transform(ProxyEvent),
     /// Event should be dropped (filtered out)
     Drop,
     /// Processor encountered an error (event continues, error logged)
-    Error {
-        event: ProxyEvent,
-        error: anyhow::Error,
-    },
+    Error(anyhow::Error),
 }
 
 /// Context provided to processors for decision-making
+///
+/// Uses `Arc<str>` for cheap cloning - processor side-effects often need
+/// to clone context for async operations, and Arc clone is just a refcount bump.
 #[derive(Debug, Clone)]
 pub struct ProcessContext {
     /// Current session ID (if known)
-    pub session_id: Option<String>,
+    pub session_id: Option<Arc<str>>,
     /// User ID (API key hash, if known)
-    pub user_id: Option<String>,
+    pub user_id: Option<Arc<str>>,
     /// Whether this is a demo/test event
     pub is_demo: bool,
+}
+
+impl ProcessContext {
+    pub fn new(session_id: Option<&str>, user_id: Option<&str>, is_demo: bool) -> Self {
+        Self {
+            session_id: session_id.map(Arc::from),
+            user_id: user_id.map(Arc::from),
+            is_demo,
+        }
+    }
 }
 
 impl Default for ProcessContext {
@@ -165,9 +178,9 @@ impl Default for ProcessContext {
 /// Trait for event processors
 ///
 /// Processors are called in registration order. Each processor can:
-/// - Transform the event (modify and pass through)
-/// - Filter the event (drop it from the pipeline)
-/// - Perform side effects (logging, storage, metrics)
+/// - Transform the event (return `ProcessResult::Transform(new_event)`)
+/// - Filter the event (return `ProcessResult::Drop`)
+/// - Perform side effects and pass through (return `ProcessResult::Continue`)
 ///
 /// # Sync Design
 ///
@@ -180,7 +193,7 @@ impl Default for ProcessContext {
 ///
 /// Processors receive a reference to the event. Only processors that
 /// need to transform the event should clone it. Side-effect processors
-/// can observe without allocation.
+/// return `Continue` without any allocation.
 pub trait EventProcessor: Send + Sync {
     /// Human-readable name for logging and debugging
     fn name(&self) -> &'static str;
@@ -192,14 +205,17 @@ pub trait EventProcessor: Send + Sync {
     /// * `ctx` - Context about the current session/user
     ///
     /// # Returns
-    /// * `ProcessResult::Continue(event)` - Pass event to next processor
+    /// * `ProcessResult::Continue` - Pass event unchanged to next processor
+    /// * `ProcessResult::Transform(event)` - Pass modified event to next processor
     /// * `ProcessResult::Drop` - Remove event from pipeline
-    /// * `ProcessResult::Error { event, error }` - Log error, continue with event
+    /// * `ProcessResult::Error(e)` - Log error, continue with original event
     fn process(&self, event: &ProxyEvent, ctx: &ProcessContext) -> ProcessResult;
 
     /// Called when the pipeline is shutting down
     ///
     /// Use this for cleanup: flush buffers, signal threads to stop, etc.
+    /// Implementations MUST block until cleanup is complete (e.g., background
+    /// threads have finished flushing).
     fn shutdown(&self) -> anyhow::Result<()> {
         Ok(())
     }
@@ -227,20 +243,31 @@ impl EventPipeline {
 
     /// Process an event through all registered processors
     ///
-    /// Returns `Some(event)` if the event should be emitted,
+    /// Returns `Some(Cow::Borrowed(event))` if no transformation occurred,
+    /// `Some(Cow::Owned(event))` if any processor transformed the event,
     /// `None` if any processor filtered it out.
-    pub fn process(&self, event: &ProxyEvent, ctx: &ProcessContext) -> Option<ProxyEvent> {
-        // Start with a clone only if we have processors
+    ///
+    /// Using `Cow` avoids cloning when all processors are side-effect-only.
+    pub fn process<'a>(
+        &self,
+        event: &'a ProxyEvent,
+        ctx: &ProcessContext,
+    ) -> Option<Cow<'a, ProxyEvent>> {
         if self.processors.is_empty() {
-            return Some(event.clone());
+            return Some(Cow::Borrowed(event));
         }
 
-        let mut current_event = event.clone();
+        // Track whether we've had to clone yet
+        let mut current: Cow<'a, ProxyEvent> = Cow::Borrowed(event);
 
         for processor in &self.processors {
-            match processor.process(&current_event, ctx) {
-                ProcessResult::Continue(e) => {
-                    current_event = e;
+            match processor.process(current.as_ref(), ctx) {
+                ProcessResult::Continue => {
+                    // No change, keep current (borrowed or owned)
+                }
+                ProcessResult::Transform(new_event) => {
+                    // Processor transformed the event
+                    current = Cow::Owned(new_event);
                 }
                 ProcessResult::Drop => {
                     tracing::trace!(
@@ -249,23 +276,27 @@ impl EventPipeline {
                     );
                     return None;
                 }
-                ProcessResult::Error { event, error } => {
+                ProcessResult::Error(error) => {
                     tracing::error!(
                         "Processor '{}' error: {}",
                         processor.name(),
                         error
                     );
-                    // Continue with the event despite error
-                    current_event = event;
+                    // Continue with current event despite error
                 }
             }
         }
-        Some(current_event)
+        Some(current)
     }
 
     /// Shutdown all processors gracefully
+    ///
+    /// Calls shutdown() on each processor in reverse registration order.
+    /// Blocks until all processors have completed cleanup.
     pub fn shutdown(&self) -> anyhow::Result<()> {
-        for processor in &self.processors {
+        // Shutdown in reverse order (LIFO) - processors registered last
+        // may depend on those registered first
+        for processor in self.processors.iter().rev() {
             if let Err(e) = processor.shutdown() {
                 tracing::warn!(
                     "Processor '{}' shutdown error: {}",
@@ -303,6 +334,12 @@ impl Default for EventPipeline {
 - Explicit backpressure handling with metrics
 - WAL mode for concurrent reads
 
+**Key changes from v2 (this revision):**
+- Completion signal for graceful shutdown (fixes race condition)
+- Schema migration system for safe upgrades
+- FTS delete sync contract documented
+- `events_store_failed` metric for partial batch failures
+
 **Location:** `src/pipeline/lifestats.rs`
 
 ```rust
@@ -332,7 +369,7 @@ use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -377,8 +414,10 @@ impl Default for LifestatsConfig {
 pub struct LifestatsMetrics {
     /// Events successfully stored
     pub events_stored: AtomicU64,
-    /// Events dropped due to backpressure
+    /// Events dropped due to backpressure (channel full)
     pub events_dropped: AtomicU64,
+    /// Events that failed to store (DB error during batch)
+    pub events_store_failed: AtomicU64,
     /// Current batch buffer size
     pub batch_pending: AtomicU64,
     /// Total write latency (for averaging)
@@ -392,6 +431,7 @@ impl LifestatsMetrics {
         MetricsSnapshot {
             events_stored: self.events_stored.load(Ordering::Relaxed),
             events_dropped: self.events_dropped.load(Ordering::Relaxed),
+            events_store_failed: self.events_store_failed.load(Ordering::Relaxed),
             batch_pending: self.batch_pending.load(Ordering::Relaxed),
             avg_write_latency_us: {
                 let total = self.write_latency_us.load(Ordering::Relaxed);
@@ -406,6 +446,7 @@ impl LifestatsMetrics {
 pub struct MetricsSnapshot {
     pub events_stored: u64,
     pub events_dropped: u64,
+    pub events_store_failed: u64,
     pub batch_pending: u64,
     pub avg_write_latency_us: u64,
 }
@@ -416,6 +457,44 @@ enum WriterCommand {
     Shutdown,
 }
 
+/// Completion signal for graceful shutdown
+///
+/// Uses a Condvar to block shutdown() until the writer thread has finished
+/// flushing its batch and exited cleanly.
+struct CompletionSignal {
+    mutex: Mutex<bool>,
+    condvar: Condvar,
+}
+
+impl CompletionSignal {
+    fn new() -> Self {
+        Self {
+            mutex: Mutex::new(false),
+            condvar: Condvar::new(),
+        }
+    }
+
+    /// Signal that the writer thread has completed
+    fn complete(&self) {
+        let mut done = self.mutex.lock().unwrap();
+        *done = true;
+        self.condvar.notify_all();
+    }
+
+    /// Wait for the writer thread to complete (with timeout)
+    fn wait(&self, timeout: Duration) -> bool {
+        let mut done = self.mutex.lock().unwrap();
+        while !*done {
+            let result = self.condvar.wait_timeout(done, timeout).unwrap();
+            done = result.0;
+            if result.1.timed_out() {
+                return false; // Timeout
+            }
+        }
+        true // Completed
+    }
+}
+
 /// Lifetime statistics processor
 ///
 /// Writes events to SQLite using a dedicated thread.
@@ -424,6 +503,8 @@ pub struct LifestatsProcessor {
     tx: SyncSender<WriterCommand>,
     /// Handle to writer thread (for join on shutdown)
     writer_handle: Option<JoinHandle<()>>,
+    /// Completion signal for graceful shutdown
+    completion: Arc<CompletionSignal>,
     /// Shared metrics
     metrics: Arc<LifestatsMetrics>,
     /// Config for reference
@@ -447,6 +528,10 @@ impl LifestatsProcessor {
         let metrics = Arc::new(LifestatsMetrics::default());
         let writer_metrics = metrics.clone();
 
+        // Completion signal for graceful shutdown
+        let completion = Arc::new(CompletionSignal::new());
+        let writer_completion = completion.clone();
+
         // Clone config for writer thread
         let writer_config = config.clone();
 
@@ -457,11 +542,14 @@ impl LifestatsProcessor {
                 if let Err(e) = Self::writer_thread(rx, writer_config, writer_metrics) {
                     tracing::error!("Lifestats writer thread error: {}", e);
                 }
+                // Signal completion regardless of success/failure
+                writer_completion.complete();
             })?;
 
         Ok(Self {
             tx,
             writer_handle: Some(writer_handle),
+            completion,
             metrics,
             config,
         })
@@ -540,12 +628,14 @@ impl LifestatsProcessor {
 
         let start = Instant::now();
         let count = batch.len();
+        let mut failed_count = 0u64;
 
         conn.execute("BEGIN TRANSACTION", [])?;
 
         for (event, ctx) in batch.drain(..) {
             if let Err(e) = Self::store_event(conn, &event, &ctx, config) {
-                // Log but don't fail the batch
+                // Log but don't fail the batch (best-effort storage)
+                failed_count += 1;
                 tracing::warn!("Failed to store event: {}", e);
             }
         }
@@ -554,25 +644,70 @@ impl LifestatsProcessor {
 
         // Update metrics
         let latency = start.elapsed().as_micros() as u64;
-        metrics.events_stored.fetch_add(count as u64, Ordering::Relaxed);
+        let stored_count = count as u64 - failed_count;
+        metrics.events_stored.fetch_add(stored_count, Ordering::Relaxed);
+        if failed_count > 0 {
+            metrics.events_store_failed.fetch_add(failed_count, Ordering::Relaxed);
+        }
         metrics.write_latency_us.fetch_add(latency, Ordering::Relaxed);
         metrics.flush_count.fetch_add(1, Ordering::Relaxed);
         metrics.batch_pending.store(0, Ordering::Relaxed);
 
-        tracing::trace!("Flushed {} events in {}µs", count, latency);
+        tracing::trace!(
+            "Flushed {} events ({} failed) in {}µs",
+            count, failed_count, latency
+        );
 
         Ok(())
     }
 
-    /// Initialize database schema with WAL mode
+    /// Initialize database schema with WAL mode and run migrations
     fn init_schema(conn: &Connection) -> anyhow::Result<()> {
+        // Performance settings (always applied)
         conn.execute_batch(
             r#"
-            -- Performance settings
             PRAGMA journal_mode=WAL;
             PRAGMA synchronous=NORMAL;
             PRAGMA busy_timeout=5000;
             PRAGMA cache_size=-64000;  -- 64MB cache
+            -- Note: FK constraints are declarative only (PRAGMA foreign_keys=OFF by default)
+            -- This allows tool_results to arrive before/without their tool_calls
+            "#,
+        )?;
+
+        // Check current schema version
+        let current_version: i32 = conn
+            .query_row(
+                "SELECT COALESCE(
+                    (SELECT CAST(value AS INTEGER) FROM metadata WHERE key = 'schema_version'),
+                    0
+                )",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        // Apply migrations
+        if current_version < 1 {
+            Self::apply_schema_v1(conn)?;
+        }
+        if current_version < 2 {
+            Self::migrate_v1_to_v2(conn)?;
+        }
+        // Future: if current_version < 3 { Self::migrate_v2_to_v3(conn)?; }
+
+        Ok(())
+    }
+
+    /// Initial schema (v1)
+    fn apply_schema_v1(conn: &Connection) -> anyhow::Result<()> {
+        conn.execute_batch(
+            r#"
+            -- Metadata table (created first for version tracking)
+            CREATE TABLE IF NOT EXISTS metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
 
             -- Sessions table
             CREATE TABLE IF NOT EXISTS sessions (
@@ -675,16 +810,127 @@ impl LifestatsProcessor {
                 tokenize='porter unicode61'
             );
 
-            -- Metadata table for schema versioning
-            CREATE TABLE IF NOT EXISTS metadata (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            );
-            INSERT OR IGNORE INTO metadata (key, value) VALUES ('schema_version', '2');
+            -- Set initial version
+            INSERT INTO metadata (key, value) VALUES ('schema_version', '1');
             "#,
         )?;
 
         Ok(())
+    }
+
+    /// Migration from v1 to v2 (adds source column to sessions)
+    fn migrate_v1_to_v2(conn: &Connection) -> anyhow::Result<()> {
+        conn.execute_batch(
+            r#"
+            -- v2: Add source column to sessions (if not exists)
+            ALTER TABLE sessions ADD COLUMN source TEXT;
+
+            -- Update version
+            UPDATE metadata SET value = '2' WHERE key = 'schema_version';
+            "#,
+        )?;
+        tracing::info!("Migrated lifestats database from v1 to v2");
+        Ok(())
+    }
+
+    /// Retention cleanup - deletes old data and syncs FTS indexes
+    ///
+    /// # FTS External Content Sync Contract
+    ///
+    /// We use FTS5 external content tables (`content=thinking_blocks`) for
+    /// space efficiency - the actual text is stored once in the base table,
+    /// and FTS just indexes it. However, this means:
+    ///
+    /// - INSERTs must update both base table AND FTS index (we do this in store_event)
+    /// - DELETEs must update both base table AND FTS index (this function)
+    /// - UPDATEs are not supported (we don't update stored events)
+    ///
+    /// **CRITICAL**: If you delete from the base table without deleting from
+    /// the FTS index, searches will return "ghost" rowids that point to
+    /// deleted rows, causing query errors.
+    ///
+    /// # Implementation
+    ///
+    /// We delete FTS entries FIRST, then base table entries. This order
+    /// ensures we never have dangling FTS entries even if the process
+    /// crashes mid-cleanup.
+    pub fn run_retention_cleanup(conn: &Connection, retention_days: u32) -> anyhow::Result<u64> {
+        if retention_days == 0 {
+            return Ok(0); // Retention disabled
+        }
+
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(retention_days as i64);
+        let cutoff_str = cutoff.to_rfc3339();
+        let mut deleted = 0u64;
+
+        conn.execute("BEGIN TRANSACTION", [])?;
+
+        // 1. Delete from thinking_fts FIRST (must happen before base table delete)
+        //    We use the special FTS delete syntax with rowid from base table
+        let fts_deleted: i64 = conn.execute(
+            r#"
+            DELETE FROM thinking_fts
+            WHERE rowid IN (
+                SELECT id FROM thinking_blocks WHERE timestamp < ?1
+            )
+            "#,
+            params![cutoff_str],
+        )? as i64;
+        tracing::debug!("Deleted {} entries from thinking_fts", fts_deleted);
+
+        // 2. Delete from prompts_fts FIRST
+        let prompts_fts_deleted: i64 = conn.execute(
+            r#"
+            DELETE FROM prompts_fts
+            WHERE rowid IN (
+                SELECT id FROM user_prompts WHERE timestamp < ?1
+            )
+            "#,
+            params![cutoff_str],
+        )? as i64;
+        tracing::debug!("Deleted {} entries from prompts_fts", prompts_fts_deleted);
+
+        // 3. Now delete from base tables (order matters for FK relationships)
+        deleted += conn.execute(
+            "DELETE FROM thinking_blocks WHERE timestamp < ?1",
+            params![cutoff_str],
+        )? as u64;
+
+        deleted += conn.execute(
+            "DELETE FROM user_prompts WHERE timestamp < ?1",
+            params![cutoff_str],
+        )? as u64;
+
+        deleted += conn.execute(
+            "DELETE FROM tool_results WHERE timestamp < ?1",
+            params![cutoff_str],
+        )? as u64;
+
+        deleted += conn.execute(
+            "DELETE FROM tool_calls WHERE timestamp < ?1",
+            params![cutoff_str],
+        )? as u64;
+
+        deleted += conn.execute(
+            "DELETE FROM api_usage WHERE timestamp < ?1",
+            params![cutoff_str],
+        )? as u64;
+
+        // 4. Clean up orphaned sessions (no recent activity)
+        deleted += conn.execute(
+            "DELETE FROM sessions WHERE started_at < ?1 AND ended_at IS NOT NULL",
+            params![cutoff_str],
+        )? as u64;
+
+        conn.execute("COMMIT", [])?;
+
+        tracing::info!(
+            "Retention cleanup: deleted {} records older than {} days",
+            deleted,
+            retention_days
+        );
+
+        Ok(deleted)
     }
 
     /// Store an event in the database
@@ -844,17 +1090,25 @@ impl EventProcessor for LifestatsProcessor {
         }
 
         // Always pass through (side-effect only processor)
-        ProcessResult::Continue(event.clone())
+        ProcessResult::Continue
     }
 
     fn shutdown(&self) -> anyhow::Result<()> {
         // Signal writer thread to stop
         let _ = self.tx.send(WriterCommand::Shutdown);
 
-        // Wait for thread to finish (with timeout)
-        // Note: Can't join here because we don't have &mut self
-        // The thread will finish when it processes Shutdown command
+        // Wait for completion signal (with timeout)
+        // This ensures all buffered events are flushed before we return
+        const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+        if !self.completion.wait(SHUTDOWN_TIMEOUT) {
+            tracing::warn!(
+                "Lifestats writer thread did not complete within {:?}",
+                SHUTDOWN_TIMEOUT
+            );
+            return Err(anyhow::anyhow!("Shutdown timeout"));
+        }
 
+        tracing::debug!("Lifestats processor shutdown complete");
         Ok(())
     }
 }
@@ -937,6 +1191,37 @@ pub struct ToolStats {
     pub success_rate: f64,
 }
 
+/// Search mode for FTS queries
+///
+/// Controls how the query string is processed before being sent to FTS5.
+/// Different modes offer trade-offs between safety and power.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub enum SearchMode {
+    /// Phrase search - query is wrapped in quotes
+    ///
+    /// Safe: Special characters are escaped, no FTS syntax allowed.
+    /// Best for: Simple keyword searches, user-provided queries.
+    /// Example: "solarized theme" → "\"solarized theme\""
+    #[default]
+    Phrase,
+
+    /// Natural language search - basic operators allowed
+    ///
+    /// Allows: AND, OR, NOT (case-insensitive), word prefixes (*)
+    /// Escapes: Quotes, parentheses, column prefixes
+    /// Best for: Power users who understand basic boolean logic.
+    /// Example: "solarized AND NOT vomit" → solarized AND NOT vomit
+    Natural,
+
+    /// Raw FTS5 query - no escaping
+    ///
+    /// Full FTS5 syntax: AND, OR, NOT, NEAR, *, ^, column:
+    /// Warning: Can cause query errors if syntax is invalid.
+    /// Best for: Expert users, programmatic queries, MCP tools.
+    /// Example: "content:solarized NEAR/5 theme" → passed through as-is
+    Raw,
+}
+
 /// Type of context match
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum MatchType {
@@ -982,15 +1267,21 @@ impl LifestatsQuery {
     }
 
     /// Search thinking blocks by keyword (FTS5)
+    ///
+    /// # Arguments
+    /// * `query` - The search query
+    /// * `limit` - Maximum number of results
+    /// * `mode` - How to interpret the query (default: Phrase)
     pub fn search_thinking(
         &self,
         query: &str,
         limit: usize,
+        mode: SearchMode,
     ) -> anyhow::Result<Vec<ThinkingMatch>> {
         let conn = self.conn()?;
 
-        // Escape FTS5 special characters
-        let safe_query = Self::escape_fts_query(query);
+        // Process query according to mode
+        let safe_query = Self::process_query(query, mode);
 
         let sql = r#"
             SELECT
@@ -1025,13 +1316,19 @@ impl LifestatsQuery {
     }
 
     /// Search user prompts by keyword (FTS5)
+    ///
+    /// # Arguments
+    /// * `query` - The search query
+    /// * `limit` - Maximum number of results
+    /// * `mode` - How to interpret the query (default: Phrase)
     pub fn search_prompts(
         &self,
         query: &str,
         limit: usize,
+        mode: SearchMode,
     ) -> anyhow::Result<Vec<PromptMatch>> {
         let conn = self.conn()?;
-        let safe_query = Self::escape_fts_query(query);
+        let safe_query = Self::process_query(query, mode);
 
         let sql = r#"
             SELECT
@@ -1174,15 +1471,21 @@ impl LifestatsQuery {
     }
 
     /// Combined context recovery query
+    ///
+    /// # Arguments
+    /// * `topic` - The topic to search for
+    /// * `limit` - Maximum results per source (thinking + prompts)
+    /// * `mode` - How to interpret the query (default: Phrase)
     pub fn recover_context(
         &self,
         topic: &str,
         limit: usize,
+        mode: SearchMode,
     ) -> anyhow::Result<Vec<ContextMatch>> {
         let mut results = Vec::new();
 
         // Search thinking blocks
-        for m in self.search_thinking(topic, limit)? {
+        for m in self.search_thinking(topic, limit, mode)? {
             results.push(ContextMatch {
                 match_type: MatchType::Thinking,
                 session_id: m.session_id,
@@ -1193,7 +1496,7 @@ impl LifestatsQuery {
         }
 
         // Search user prompts
-        for m in self.search_prompts(topic, limit)? {
+        for m in self.search_prompts(topic, limit, mode)? {
             results.push(ContextMatch {
                 match_type: MatchType::UserPrompt,
                 session_id: m.session_id,
@@ -1212,11 +1515,63 @@ impl LifestatsQuery {
         Ok(results)
     }
 
-    /// Escape special characters for FTS5 query
-    fn escape_fts_query(query: &str) -> String {
-        // FTS5 special characters: " * ^ : ( ) AND OR NOT
-        // Wrap in quotes for phrase search, escape internal quotes
-        format!("\"{}\"", query.replace('"', "\"\""))
+    /// Process query according to SearchMode
+    ///
+    /// # Modes
+    /// - **Phrase**: Escape everything, wrap in quotes (safest)
+    /// - **Natural**: Allow AND/OR/NOT and prefix wildcards, escape rest
+    /// - **Raw**: Pass through as-is (dangerous, full FTS5 syntax)
+    fn process_query(query: &str, mode: SearchMode) -> String {
+        match mode {
+            SearchMode::Phrase => {
+                // Escape internal quotes and wrap in quotes for exact phrase
+                format!("\"{}\"", query.replace('"', "\"\""))
+            }
+            SearchMode::Natural => {
+                // Preserve AND, OR, NOT operators and * wildcards
+                // Escape quotes, parentheses, and column prefixes
+                let mut result = String::with_capacity(query.len());
+                let tokens: Vec<&str> = query.split_whitespace().collect();
+
+                for (i, token) in tokens.iter().enumerate() {
+                    if i > 0 {
+                        result.push(' ');
+                    }
+
+                    // Preserve boolean operators (case-insensitive check)
+                    let upper = token.to_uppercase();
+                    if upper == "AND" || upper == "OR" || upper == "NOT" {
+                        result.push_str(&upper);
+                        continue;
+                    }
+
+                    // Escape special characters but preserve trailing *
+                    let has_wildcard = token.ends_with('*');
+                    let base = if has_wildcard {
+                        &token[..token.len() - 1]
+                    } else {
+                        token
+                    };
+
+                    // Escape quotes and parentheses
+                    let escaped = base
+                        .replace('"', "\"\"")
+                        .replace('(', "")
+                        .replace(')', "")
+                        .replace(':', " "); // Remove column prefixes
+
+                    result.push_str(&escaped);
+                    if has_wildcard {
+                        result.push('*');
+                    }
+                }
+                result
+            }
+            SearchMode::Raw => {
+                // Pass through as-is - caller is responsible for validity
+                query.to_string()
+            }
+        }
     }
 }
 ```
@@ -1227,7 +1582,57 @@ impl LifestatsQuery {
 
 **Location:** Parser module (request handling)
 
-User prompts should be extracted from the request body when parsing messages:
+### Extraction Flow
+
+User prompts are extracted from the **request body** (not the response) during the proxy's request interception. This happens in the parser module when a POST `/messages` request arrives.
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│                     User Prompt Extraction Flow                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+ Claude Code                Proxy                     Parser
+     │                        │                          │
+     │  POST /v1/messages     │                          │
+     │  ─────────────────────>│                          │
+     │                        │                          │
+     │                        │   intercept_request()    │
+     │                        │  ──────────────────────> │
+     │                        │                          │
+     │                        │                          ├─── parse body JSON
+     │                        │                          │
+     │                        │                          ├─── extract messages[]
+     │                        │                          │
+     │                        │                          ├─── find last user message
+     │                        │                          │     (iterate reverse)
+     │                        │                          │
+     │                        │                          ├─── extract text content
+     │                        │                          │     (string or array)
+     │                        │                          │
+     │                        │   ProxyEvent::UserPrompt │
+     │                        │  <────────────────────── │
+     │                        │                          │
+     │                        │                          │
+     │                        │   send_event()           │
+     │                        │  ───────────────────────>│ EventPipeline
+     │                        │                          │     │
+     │                        │                          │     ├─→ LifestatsProcessor
+     │                        │                          │     │       (stores to SQLite)
+     │                        │                          │     │
+     │                        │                          │     └─→ TUI, Storage, etc.
+     │                        │                          │
+     │                        │ forward to Anthropic     │
+     │                        │  ─────────────────────────────────────────>
+```
+
+### Key Points
+
+1. **Timing**: Extraction happens BEFORE the request is forwarded to Anthropic
+2. **Source**: The `messages` array in the request body
+3. **Selection**: We take the LAST user message (most recent in conversation)
+4. **Content formats**: Handle both string and array (multipart) content
+
+### Implementation
 
 ```rust
 // In parser/mod.rs, when handling POST /messages requests
@@ -1416,6 +1821,8 @@ pub struct LifestatsHealth {
 
 ## Summary of Peer Review Changes
 
+### v1 → v2 (First Peer Review)
+
 | Issue | Fix |
 |-------|-----|
 | 🔴 SQLite blocking async | Dedicated OS thread via `std::thread::spawn` |
@@ -1426,3 +1833,17 @@ pub struct LifestatsHealth {
 | 🟡 Missing WAL mode | Added in schema init with proper PRAGMAs |
 | 🟡 No connection pooling | r2d2-sqlite for query interface |
 | 🟡 No error handling | `ProcessResult::Error` variant added |
+
+### v2 → v3 (Second Peer Review)
+
+| Issue | Fix |
+|-------|-----|
+| 🔴 Shutdown race condition | `CompletionSignal` with Condvar, `shutdown()` waits for completion |
+| 🔴 FTS delete sync not documented | `run_retention_cleanup()` with explicit FTS delete contract |
+| 🔴 No schema migration system | Version-based migrations (`init_schema`, `apply_schema_v1`, `migrate_v1_to_v2`) |
+| 🔴 User prompt extraction underspecified | Sequence diagram and implementation guidance added |
+| 🟠 FTS query escaping disables advanced search | `SearchMode` enum (Phrase/Natural/Raw) |
+| 🟠 Partial batch commits no metric | `events_store_failed` counter in `LifestatsMetrics` |
+| 🟠 ProcessContext cloning overhead | Changed to `Arc<str>` for cheap cloning |
+| 🟡 Pipeline always clones event | Changed to `Cow<ProxyEvent>` for zero-copy passthrough |
+| 🟡 ProcessResult::Continue still clones | Removed event parameter, now returns unit `Continue` |
