@@ -345,6 +345,40 @@ context_warning_thresholds = {thresholds:?}
 # Logging configuration (RUST_LOG env var overrides)
 [logging]
 level = "{log_level}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MULTI-CLIENT ROUTING (Optional)
+# ─────────────────────────────────────────────────────────────────────────────
+# Track multiple Claude Code instances through a single proxy using named clients.
+# Each client connects via URL path: http://localhost:8080/<client-id>
+#
+# Example: ANTHROPIC_BASE_URL=http://127.0.0.1:8080/dev-1 claude
+
+# [clients.dev-1]
+# name = "Dev Laptop"
+# provider = "anthropic"       # References [providers.anthropic] below
+
+# [clients.work]
+# name = "Work Projects"
+# provider = "anthropic"
+
+# [clients.foundry]
+# name = "Foundry Testing"
+# provider = "aws-foundry"     # Route to a different backend
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROVIDER BACKENDS (Optional)
+# ─────────────────────────────────────────────────────────────────────────────
+# Define where to forward API requests. Clients reference these by name.
+
+# [providers.anthropic]
+# base_url = "https://api.anthropic.com"
+
+# [providers.aws-foundry]
+# base_url = "https://bedrock-runtime.us-east-1.amazonaws.com"
+
+# [providers.local]
+# base_url = "http://localhost:11434"   # For local LLM testing
 "#,
             theme = self.theme,
             use_bg = self.use_theme_background,
