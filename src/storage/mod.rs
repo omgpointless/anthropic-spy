@@ -43,8 +43,7 @@ impl Storage {
     /// Get the path to this session's log file
     /// Format: aspy-YYYYMMDD-HHMMSS-XXXX.jsonl
     fn log_file_path(&self) -> PathBuf {
-        self.log_dir
-            .join(format!("aspy-{}.jsonl", self.session_id))
+        self.log_dir.join(format!("aspy-{}.jsonl", self.session_id))
     }
 
     /// Run the storage loop, writing events to disk as they arrive

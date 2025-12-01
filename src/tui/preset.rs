@@ -338,9 +338,10 @@ impl Preset {
 
             events_view: ViewLayout {
                 // Events take everything - no thinking panel
-                layout: Layout::horizontal(vec![
-                    LayoutSlot::new(Panel::Events, SizeConstraint::Percent(100)),
-                ]),
+                layout: Layout::horizontal(vec![LayoutSlot::new(
+                    Panel::Events,
+                    SizeConstraint::Percent(100),
+                )]),
             },
 
             stats_view: ViewLayout {
@@ -349,10 +350,7 @@ impl Preset {
 
             settings_view: None,
 
-            focus_order: vec![
-                FocusablePanel::Events,
-                FocusablePanel::Logs,
-            ],
+            focus_order: vec![FocusablePanel::Events, FocusablePanel::Logs],
         }
     }
 

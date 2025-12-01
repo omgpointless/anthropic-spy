@@ -470,7 +470,9 @@ fn generate_demo_sequence() -> Vec<(ProxyEvent, u64)> {
             id: format!("{}-result", last_tool_id),
             timestamp: Utc::now(),
             tool_name: "Bash".to_string(),
-            output: json!("   Compiling aspy v0.1.0\n    Finished release [optimized] target(s) in 12.34s"),
+            output: json!(
+                "   Compiling aspy v0.1.0\n    Finished release [optimized] target(s) in 12.34s"
+            ),
             duration: Duration::from_millis(3240), // cargo build
             success: true,
         },
