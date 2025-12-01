@@ -222,6 +222,12 @@ pre {
   }
 }
 
+.header-logo {
+  height: 28px;
+  width: auto;
+  border-radius: 4px;
+}
+
 .site-nav {
   margin-top: 0.75rem;
 
@@ -255,6 +261,12 @@ pre {
 
 .page-content {
   min-height: calc(100vh - 200px);
+
+  // Constrain all images and gifs to column width
+  img {
+    max-width: 100%;
+    height: auto;
+  }
 }
 
 .post-header {
