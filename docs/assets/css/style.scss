@@ -551,14 +551,17 @@ tr:hover {
 }
 
 .feature-card {
+  display: block;
   background-color: $background-light;
   border: 1px solid $border;
   border-radius: 8px;
   padding: 1.25rem;
-  transition: border-color 0.2s ease;
+  transition: border-color 0.2s linear;
+  text-decoration: none;
 
   &:hover {
     border-color: $border-focused;
+    text-decoration: none;
   }
 
   h3 {

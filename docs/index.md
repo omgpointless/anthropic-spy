@@ -24,30 +24,30 @@ title: Home
 </div>
 
 <div class="feature-grid">
-  <div class="feature-card">
+  <a href="{{ '/features#real-time-thinking-panel' | relative_url }}" class="feature-card">
     <h3>Real-time Visibility</h3>
     <p>Watch tool calls, API requests, and responses the moment they happen. No more wondering what Claude is doing or thinking.</p>
-  </div>
-  <div class="feature-card">
+  </a>
+  <a href="{{ '/features#stats-dashboard' | relative_url }}" class="feature-card">
     <h3>Detailed Statistics</h3>
     <p>Token usage with sparklines, model breakdowns, tool call counts, and execution times. A full stats dashboard at your fingertips.</p>
-  </div>
-  <div class="feature-card">
+  </a>
+  <a href="{{ '/sessions' | relative_url }}" class="feature-card">
     <h3>Multi-Session Support</h3>
     <p>Run multiple Claude Code instances through a single proxy. Each session tracked independently.</p>
-  </div>
-  <div class="feature-card">
+  </a>
+  <a href="{{ '/features#real-time-thinking-panel' | relative_url }}" class="feature-card">
     <h3>Thinking Blocks</h3>
     <p>Peek into Claude's reasoning process. Understand the "why" behind the actions.</p>
-  </div>
-  <div class="feature-card">
+  </a>
+  <a href="{{ '/themes' | relative_url }}" class="feature-card">
     <h3>32 Themes & Custom</h3>
     <p>Make your terminal beautiful. Built-in themes from Dracula to Solarized, plus full TOML custom theme support.</p>
-  </div>
-  <div class="feature-card">
+  </a>
+  <a href="{{ '/features#context-recall' | relative_url }}" class="feature-card">
     <h3>Context Recall (MCP)</h3>
     <p>Search past sessions. Let new Claude instances recall what previous ones discovered—context that survives compaction.</p>
-  </div>
+  </a>
 </div>
 
 ## Why Use It?
