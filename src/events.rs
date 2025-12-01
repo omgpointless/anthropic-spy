@@ -7,8 +7,8 @@
 use crate::parser::models::CapturedHeaders;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::time::Duration;
+use std::collections::{HashMap, VecDeque};
+use std::time::{Duration, Instant};
 
 /// Main event type that flows through the application
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,7 +111,7 @@ pub enum ProxyEvent {
 }
 
 /// Summary statistics for the status bar
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Stats {
     pub total_requests: usize,
     pub failed_requests: usize,
@@ -129,13 +129,13 @@ pub struct Stats {
     pub total_cache_read_tokens: u64,
 
     // Context window tracking (most recent API call's context size)
-    /// Current context size = input_tokens + cache_read_tokens from last ApiUsage
+    /// Current context size = input + cache_creation + cache_read tokens from last ApiUsage
     pub current_context_tokens: u64,
     /// Last seen cache_read_tokens (for compact detection)
     pub last_cached_tokens: u64,
     /// Number of context compacts detected this session
     pub compact_count: usize,
-    /// Configured context limit (from config file, default 150K)
+    /// Configured context limit (from config file, default 147K)
     pub configured_context_limit: u64,
 
     // Thinking block tracking
@@ -165,6 +165,19 @@ pub struct Stats {
     /// Tool execution durations for timing analysis
     /// Stores durations in milliseconds to avoid Duration in HashMap
     pub tool_durations_ms: HashMap<String, Vec<u64>>,
+
+    // === Historical data for trend visualization (Sparklines) ===
+    /// Token usage snapshots (last 30 data points)
+    pub token_history: VecDeque<TokenSnapshot>,
+
+    /// Tool call frequency over time (last 30 data points)
+    pub tool_call_history: VecDeque<u32>,
+
+    /// Cache hit rate history (last 30 data points)
+    pub cache_rate_history: VecDeque<f64>,
+
+    /// Thinking token progression (last 30 data points)
+    pub thinking_token_history: VecDeque<u64>,
 }
 
 /// Per-model token tracking for Statistics view
@@ -175,6 +188,16 @@ pub struct ModelTokens {
     pub cache_read: u64,
     pub cache_creation: u64,
     pub calls: u32,
+}
+
+/// Snapshot of token usage at a point in time for sparkline trends
+#[derive(Debug, Clone)]
+pub struct TokenSnapshot {
+    #[allow(dead_code)] // Used for sparkline x-axis when trends feature lands
+    pub timestamp: Instant,
+    pub input: u64,
+    pub output: u64,
+    pub cached: u64,
 }
 
 impl Stats {
@@ -240,17 +263,6 @@ impl Stats {
         }
     }
 
-    /// Get average tool execution time in milliseconds for a specific tool
-    pub fn avg_tool_duration_ms(&self, tool_name: &str) -> Option<u64> {
-        self.tool_durations_ms.get(tool_name).and_then(|durations| {
-            if durations.is_empty() {
-                None
-            } else {
-                Some(durations.iter().sum::<u64>() / durations.len() as u64)
-            }
-        })
-    }
-
     /// Get context window usage as percentage (0-100)
     /// Returns None if no context data available yet
     pub fn context_usage_percent(&self) -> Option<f64> {
@@ -266,7 +278,239 @@ impl Stats {
         if self.configured_context_limit > 0 {
             self.configured_context_limit
         } else {
-            150_000 // Default fallback
+            147_000 // Default fallback
+        }
+    }
+
+    /// Update ONLY historical ring buffers (for TUI use)
+    /// The TUI handles aggregate stats manually for TUI-specific logic
+    pub fn update_history(&mut self, event: &ProxyEvent) {
+        match event {
+            ProxyEvent::ToolCall { .. } => {
+                // === Historical tracking for sparklines ===
+                self.tool_call_history.push_back(self.total_tool_calls as u32);
+                if self.tool_call_history.len() > 30 {
+                    self.tool_call_history.pop_front();
+                }
+            }
+            ProxyEvent::ApiUsage {
+                input_tokens,
+                output_tokens,
+                cache_read_tokens,
+                ..
+            } => {
+                // === Historical tracking for sparklines ===
+                // Add token snapshot
+                self.token_history.push_back(TokenSnapshot {
+                    timestamp: Instant::now(),
+                    input: *input_tokens as u64,
+                    output: *output_tokens as u64,
+                    cached: *cache_read_tokens as u64,
+                });
+                if self.token_history.len() > 30 {
+                    self.token_history.pop_front();
+                }
+
+                // Add cache hit rate snapshot
+                let cache_rate = self.cache_hit_rate();
+                self.cache_rate_history.push_back(cache_rate);
+                if self.cache_rate_history.len() > 30 {
+                    self.cache_rate_history.pop_front();
+                }
+            }
+            ProxyEvent::Thinking { token_estimate, .. } => {
+                // === Historical tracking for sparklines ===
+                self.thinking_token_history.push_back(*token_estimate as u64);
+                if self.thinking_token_history.len() > 30 {
+                    self.thinking_token_history.pop_front();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Update stats based on a proxy event
+    pub fn update(&mut self, event: &ProxyEvent) {
+        match event {
+            ProxyEvent::Request { .. } => {
+                self.total_requests += 1;
+            }
+            ProxyEvent::Response {
+                status,
+                ttfb,
+                ..
+            } => {
+                if *status >= 400 {
+                    self.failed_requests += 1;
+                }
+                self.total_ttfb += *ttfb;
+                self.response_count += 1;
+            }
+            ProxyEvent::ToolCall { .. } => {
+                self.total_tool_calls += 1;
+
+                // === Historical tracking for sparklines ===
+                // Track cumulative tool calls over time
+                self.tool_call_history.push_back(self.total_tool_calls as u32);
+                if self.tool_call_history.len() > 30 {
+                    self.tool_call_history.pop_front();
+                }
+            }
+            ProxyEvent::ToolResult {
+                tool_name,
+                success,
+                duration,
+                ..
+            } => {
+                if !success {
+                    self.failed_tool_calls += 1;
+                }
+                // Track tool durations
+                self.tool_durations_ms
+                    .entry(tool_name.clone())
+                    .or_default()
+                    .push(duration.as_millis() as u64);
+                // Track tool call counts
+                *self.tool_calls_by_name.entry(tool_name.clone()).or_default() += 1;
+            }
+            ProxyEvent::ApiUsage {
+                model,
+                input_tokens,
+                output_tokens,
+                cache_creation_tokens,
+                cache_read_tokens,
+                ..
+            } => {
+                self.total_input_tokens += *input_tokens as u64;
+                self.total_output_tokens += *output_tokens as u64;
+                self.total_cache_creation_tokens += *cache_creation_tokens as u64;
+                self.total_cache_read_tokens += *cache_read_tokens as u64;
+                self.current_model = Some(model.clone());
+
+                // Update context tracking
+                self.current_context_tokens = (*input_tokens + *cache_read_tokens) as u64;
+                self.last_cached_tokens = *cache_read_tokens as u64;
+
+                // Track per-model stats
+                let model_stats = self.model_tokens.entry(model.clone()).or_default();
+                model_stats.input += *input_tokens as u64;
+                model_stats.output += *output_tokens as u64;
+                model_stats.cache_read += *cache_read_tokens as u64;
+                model_stats.cache_creation += *cache_creation_tokens as u64;
+                model_stats.calls += 1;
+
+                *self.model_calls.entry(model.clone()).or_default() += 1;
+
+                // === Historical tracking for sparklines ===
+                // Add token snapshot
+                self.token_history.push_back(TokenSnapshot {
+                    timestamp: Instant::now(),
+                    input: *input_tokens as u64,
+                    output: *output_tokens as u64,
+                    cached: *cache_read_tokens as u64,
+                });
+                if self.token_history.len() > 30 {
+                    self.token_history.pop_front();
+                }
+
+                // Add cache hit rate snapshot
+                let cache_rate = self.cache_hit_rate();
+                self.cache_rate_history.push_back(cache_rate);
+                if self.cache_rate_history.len() > 30 {
+                    self.cache_rate_history.pop_front();
+                }
+            }
+            ProxyEvent::Thinking { token_estimate, content, .. } => {
+                self.thinking_blocks += 1;
+                self.thinking_tokens += *token_estimate as u64;
+                self.current_thinking = Some(content.clone());
+
+                // === Historical tracking for sparklines ===
+                self.thinking_token_history.push_back(*token_estimate as u64);
+                if self.thinking_token_history.len() > 30 {
+                    self.thinking_token_history.pop_front();
+                }
+            }
+            ProxyEvent::ContextCompact { .. } => {
+                self.compact_count += 1;
+            }
+            _ => {}
+        }
+    }
+
+    /// Merge another Stats into this one (for aggregation)
+    #[allow(dead_code)] // Used by SessionManager::aggregate_stats (pending integration)
+    pub fn merge(&mut self, other: &Stats) {
+        self.total_requests += other.total_requests;
+        self.failed_requests += other.failed_requests;
+        self.total_tool_calls += other.total_tool_calls;
+        self.failed_tool_calls += other.failed_tool_calls;
+        self.total_ttfb += other.total_ttfb;
+        self.response_count += other.response_count;
+
+        self.total_input_tokens += other.total_input_tokens;
+        self.total_output_tokens += other.total_output_tokens;
+        self.total_cache_creation_tokens += other.total_cache_creation_tokens;
+        self.total_cache_read_tokens += other.total_cache_read_tokens;
+
+        self.thinking_blocks += other.thinking_blocks;
+        self.thinking_tokens += other.thinking_tokens;
+        self.compact_count += other.compact_count;
+
+        // Merge per-model stats
+        for (model, tokens) in &other.model_tokens {
+            let entry = self.model_tokens.entry(model.clone()).or_default();
+            entry.input += tokens.input;
+            entry.output += tokens.output;
+            entry.cache_read += tokens.cache_read;
+            entry.cache_creation += tokens.cache_creation;
+            entry.calls += tokens.calls;
+        }
+
+        for (model, count) in &other.model_calls {
+            *self.model_calls.entry(model.clone()).or_default() += count;
+        }
+
+        for (tool, count) in &other.tool_calls_by_name {
+            *self.tool_calls_by_name.entry(tool.clone()).or_default() += count;
+        }
+
+        // Note: tool_durations_ms, current_thinking, current_model not merged
+        // These are "current state" fields, not aggregatable
+    }
+}
+
+impl Default for Stats {
+    fn default() -> Self {
+        Self {
+            total_requests: 0,
+            failed_requests: 0,
+            total_tool_calls: 0,
+            failed_tool_calls: 0,
+            total_ttfb: Duration::default(),
+            response_count: 0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            total_cache_creation_tokens: 0,
+            total_cache_read_tokens: 0,
+            current_context_tokens: 0,
+            last_cached_tokens: 0,
+            compact_count: 0,
+            configured_context_limit: 0,
+            thinking_blocks: 0,
+            thinking_tokens: 0,
+            current_model: None,
+            current_thinking: None,
+            session_started: None,
+            model_calls: HashMap::new(),
+            model_tokens: HashMap::new(),
+            tool_calls_by_name: HashMap::new(),
+            tool_durations_ms: HashMap::new(),
+            // Initialize ring buffers with capacity 30
+            token_history: VecDeque::with_capacity(30),
+            tool_call_history: VecDeque::with_capacity(30),
+            cache_rate_history: VecDeque::with_capacity(30),
+            thinking_token_history: VecDeque::with_capacity(30),
         }
     }
 }

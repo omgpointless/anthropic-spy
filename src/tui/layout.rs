@@ -4,22 +4,22 @@
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Breakpoint {
-    /// < 60 cols: Split pane, minimal terminal
+    /// < 50 cols: Tiny terminal, minimal content
     Compact,
-    /// 60-99 cols: Half-screen
+    /// 50-79 cols: Split pane, condensed format
     Normal,
-    /// 100-139 cols: Full terminal
+    /// 80-119 cols: Standard terminal, full format
     Wide,
-    /// 140+ cols: Ultrawide monitor
+    /// 120+ cols: Wide/ultrawide monitor
     UltraWide,
 }
 
 impl Breakpoint {
     pub fn from_width(width: u16) -> Self {
         match width {
-            0..=59 => Breakpoint::Compact,
-            60..=99 => Breakpoint::Normal,
-            100..=139 => Breakpoint::Wide,
+            0..=49 => Breakpoint::Compact,
+            50..=79 => Breakpoint::Normal,
+            80..=119 => Breakpoint::Wide,
             _ => Breakpoint::UltraWide,
         }
     }
@@ -46,12 +46,12 @@ mod tests {
     #[test]
     fn breakpoint_thresholds() {
         assert_eq!(Breakpoint::from_width(40), Breakpoint::Compact);
-        assert_eq!(Breakpoint::from_width(59), Breakpoint::Compact);
-        assert_eq!(Breakpoint::from_width(60), Breakpoint::Normal);
-        assert_eq!(Breakpoint::from_width(99), Breakpoint::Normal);
-        assert_eq!(Breakpoint::from_width(100), Breakpoint::Wide);
-        assert_eq!(Breakpoint::from_width(139), Breakpoint::Wide);
-        assert_eq!(Breakpoint::from_width(140), Breakpoint::UltraWide);
+        assert_eq!(Breakpoint::from_width(49), Breakpoint::Compact);
+        assert_eq!(Breakpoint::from_width(50), Breakpoint::Normal);
+        assert_eq!(Breakpoint::from_width(79), Breakpoint::Normal);
+        assert_eq!(Breakpoint::from_width(80), Breakpoint::Wide);
+        assert_eq!(Breakpoint::from_width(119), Breakpoint::Wide);
+        assert_eq!(Breakpoint::from_width(120), Breakpoint::UltraWide);
     }
 
     #[test]
