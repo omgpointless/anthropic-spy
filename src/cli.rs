@@ -324,7 +324,10 @@ fn handle_config_init() {
 
     // Check if config exists
     if path.exists() {
-        eprint!("Config already exists at {}. Overwrite? [y/N] ", path.display());
+        eprint!(
+            "Config already exists at {}. Overwrite? [y/N] ",
+            path.display()
+        );
         std::io::stderr().flush().unwrap();
 
         let mut input = String::new();
@@ -367,7 +370,11 @@ fn handle_config_init() {
 
     println!("Popular themes:");
     for (i, theme) in popular_themes.iter().enumerate() {
-        let marker = if *theme == "Spy Dark" { " (default)" } else { "" };
+        let marker = if *theme == "Spy Dark" {
+            " (default)"
+        } else {
+            ""
+        };
         println!("  {}. {}{}", i + 1, theme, marker);
     }
     println!("  9. Show all {} themes", themes.len());
@@ -446,7 +453,8 @@ fn handle_config_init() {
     println!();
 
     config.features.storage = prompt_bool("Enable session logging (JSONL files)?", true);
-    config.features.thinking_panel = prompt_bool("Enable thinking panel (Claude's reasoning)?", true);
+    config.features.thinking_panel =
+        prompt_bool("Enable thinking panel (Claude's reasoning)?", true);
     config.features.stats = prompt_bool("Enable stats tracking (tokens, costs)?", true);
 
     println!();
