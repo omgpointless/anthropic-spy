@@ -9,7 +9,7 @@ Switch themes in the TUI by pressing `t` to open the theme picker, then use arro
 To set a default theme, edit your config file:
 
 ```bash
-anthropic-spy config --edit
+aspy config --edit
 ```
 
 ```toml

@@ -1,41 +1,32 @@
-# demo.tape - VHS recording script for anthropic-spy
+# demo.tape - VHS recording script for aspy
 #
-# Records a demo GIF showcasing:
-# - Real-time streaming thinking (word-by-word)
-# - Panel focus cycling with Tab
-# - Event detail view
-# - Stats view with 2x2 layout
-# - Theme selector with live preview
-# - Context bar filling up
-# - Tool calls with realistic timings
+# Records a ~40 second demo GIF showcasing:
+# - Real-time streaming thinking
+# - Event navigation and detail view
+# - Stats dashboard with widgets
+# - Theme switching via Settings
 #
-# Run: vhs demo.tape
-# Or via Docker: docker run --rm -v $(pwd):/work anthropic-spy-vhs /work/demo.tape
-#
-# Theme sync: Both VHS and anthropic-spy use iTerm2-Color-Schemes format.
-# Set the same theme name for consistent appearance.
+# Run: docker run --rm -v $(pwd):/work aspy-vhs /work/demo.tape
 
 Output "/work/demo.gif"
-Set FontSize 13
+Set FontSize 14
 Set Width 1400
 Set Height 850
-Set Theme "Dracula"
+Set Theme "/app/themes/vhs/spy-dark.json"
 Set Padding 15
 Set Framerate 30
 
-# Start demo mode with matching theme
-Type "ANTHROPIC_SPY_DEMO=1 ANTHROPIC_SPY_THEME=Dracula /app/target/release/anthropic-spy"
+# Start demo mode
+Type "ANTHROPIC_SPY_DEMO=1 /app/target/release/aspy"
 Sleep 300ms
 Enter
 
-# === Phase 1: Watch thinking stream in ===
-# Wait for initial topic and first streaming thinking block
+# === Phase 1: Watch thinking stream in (8s) ===
+# Let the thinking panel fill with streaming content
 Sleep 8s
 
-# More thinking streaming
-Sleep 4s
-
-# === Phase 2: Navigate events ===
+# === Phase 2: Navigate events (5s) ===
+# Scroll through some events
 Down
 Sleep 400ms
 Down
@@ -43,27 +34,7 @@ Sleep 400ms
 Down
 Sleep 400ms
 
-# === Phase 3: Show panel focus cycling (Tab) ===
-# Tab to Thinking panel (border turns magenta)
-Tab
-Sleep 1.5s
-
-# Tab to Logs panel (border turns green)
-Tab
-Sleep 1.5s
-
-# Tab back to Events panel (border turns cyan)
-Tab
-Sleep 1s
-
-# === Phase 4: Event detail view ===
-# Navigate to a tool call event
-Down
-Sleep 300ms
-Down
-Sleep 300ms
-
-# Open detail view (Enter)
+# Open detail view on an event
 Enter
 Sleep 2s
 
@@ -72,85 +43,55 @@ Down
 Sleep 300ms
 Down
 Sleep 300ms
-Down
-Sleep 300ms
 
-# Close detail view
+# Close detail
 Escape
-Sleep 1s
+Sleep 800ms
 
-# === Phase 5: Watch more activity ===
-# Let events and thinking continue
-Sleep 4s
-
-# Navigate through events
-Down
-Sleep 400ms
-Down
-Sleep 400ms
-
-# === Phase 6: Stats view ===
+# === Phase 3: Stats view - the wow moment (7s) ===
+# Press 's' for stats
 Type "s"
 Sleep 4s
 
-# Pause on stats - shows 2x2 grid:
-# - Models panel (Opus/Haiku)
-# - Tokens panel (Cached/Input/Output bars)
-# - Tools panel (with durations)
-# - Totals panel
-Sleep 3s
-
-# Back to Events
-Type "e"
-Sleep 2s
-
-# === Phase 7: Theme selector with live preview ===
-Type "t"
-Sleep 1s
-
-# Navigate themes - watch UI colors change live!
-Down
-Sleep 800ms
-Down
-Sleep 800ms
-Down
-Sleep 800ms
-
-# Go back up
-Up
-Sleep 800ms
-Up
-Sleep 800ms
-
-# Cancel without applying (Escape restores original)
-Escape
+# Tab through stats tabs to show different widgets
+Tab
+Sleep 1.5s
+Tab
 Sleep 1.5s
 
-# Open theme selector again
-Type "t"
-Sleep 800ms
+# === Phase 4: Settings & theme (6s) ===
+# Back to events, then open settings
+Type "e"
+Sleep 500ms
 
-# Pick a different theme and apply
+# Open settings with F3
+F3
+Sleep 1s
+
+# Navigate themes
 Down
 Sleep 600ms
 Down
 Sleep 600ms
+Down
+Sleep 600ms
+
+# Apply theme
 Enter
 Sleep 2s
 
-# === Phase 8: Final activity ===
-# Watch remaining thinking stream
-Sleep 3s
-
-# Scroll to see final state
-Down
-Sleep 300ms
-Down
-Sleep 300ms
-
-# Final pause showing complete session
+# === Phase 5: Final glimpse (3s) ===
+# Back to events to show the new theme
+Type "e"
 Sleep 2s
 
+# Navigate to show activity
+Down
+Sleep 300ms
+Down
+Sleep 300ms
+
 # === Clean exit ===
-Type "q"
 Sleep 500ms
+Type "q"
+Sleep 300ms

@@ -8,10 +8,10 @@ Want to see the TUI first? Try demo mode - no Claude Code needed:
 
 ```bash
 # Windows
-$env:ANTHROPIC_SPY_DEMO="1"; .\anthropic-spy.exe
+$env:ANTHROPIC_SPY_DEMO="1"; .\aspy.exe
 
 # macOS/Linux
-ANTHROPIC_SPY_DEMO=1 ./anthropic-spy
+ANTHROPIC_SPY_DEMO=1 ./aspy
 ```
 
 This generates mock events showing thinking blocks, tool calls, and token tracking.
@@ -31,10 +31,10 @@ cargo build --release
 
 ```bash
 # Windows
-.\anthropic-spy.exe
+.\aspy.exe
 
 # macOS/Linux
-./anthropic-spy
+./aspy
 
 # Or from source
 cargo run --release
@@ -113,7 +113,7 @@ Make sure the proxy is running BEFORE starting Claude Code.
 ### "Address already in use"
 Use a different port:
 ```bash
-ANTHROPIC_SPY_BIND="127.0.0.1:9000" ./anthropic-spy
+ANTHROPIC_SPY_BIND="127.0.0.1:9000" ./aspy
 ```
 Then: `export ANTHROPIC_BASE_URL=http://127.0.0.1:9000`
 

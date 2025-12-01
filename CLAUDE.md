@@ -261,7 +261,7 @@ Examples:
 - Views system with Events, Stats, and Settings views
 - Statistics view with 5-tab dashboard (Overview, Models, Tokens, Tools, Trends)
 - Theme system with 32 bundled themes and TOML custom theme support
-- CLI configuration tool (`anthropic-spy config --init/--show/--edit/--update/--reset`)
+- CLI configuration tool (`aspy config --init/--show/--edit/--update/--reset`)
 - REST API endpoints for programmatic access
 - Multi-client routing with provider configuration
 - Context warning augmentation

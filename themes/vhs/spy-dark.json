@@ -1,0 +1,23 @@
+{
+  "name": "Spy Dark",
+  "black": "#1e1f22",
+  "red": "#c75f4a",
+  "green": "#8fad5c",
+  "yellow": "#d4a54a",
+  "blue": "#6b98b8",
+  "purple": "#a88fad",
+  "cyan": "#5da9a1",
+  "white": "#d4cfc9",
+  "brightBlack": "#3a3b40",
+  "brightRed": "#e07460",
+  "brightGreen": "#a4c76e",
+  "brightYellow": "#e8b87a",
+  "brightBlue": "#7daacc",
+  "brightPurple": "#bda4c2",
+  "brightCyan": "#6fc2b8",
+  "brightWhite": "#e8e4df",
+  "background": "#28292d",
+  "foreground": "#d4cfc9",
+  "cursorColor": "#c9a66b",
+  "selectionBackground": "#3d3834"
+}

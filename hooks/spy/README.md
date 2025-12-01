@@ -1,10 +1,10 @@
 # Project Hooks
 
-This directory contains Claude Code hooks for the aspy plugin.
+This directory contains Claude Code hooks for the aspy plugin. All hooks are written in Node.js for cross-platform compatibility (Windows, macOS, Linux).
 
 ## Active Hooks
 
-### `session-start.sh` - Session Registration
+### `session-start.js` - Session Registration
 
 **Trigger:** SessionStart (startup, resume, clear, compact)
 **Action:** Registers the session with anthropic-spy proxy for tracking
@@ -20,7 +20,7 @@ When Claude Code starts a session:
 
 ---
 
-### `session-end.sh` - Session Archival
+### `session-end.js` - Session Archival
 
 **Trigger:** SessionEnd (clear, logout, prompt_input_exit, other)
 **Action:** Notifies proxy that session has ended
@@ -33,7 +33,7 @@ When Claude Code ends:
 
 ---
 
-### `cargo-fmt.sh` - Automatic Rust Formatting
+### `cargo-fmt.js` - Automatic Rust Formatting
 
 **Trigger:** After Write or Edit tool calls on `.rs` files
 **Action:** Runs `cargo fmt` on the modified file
@@ -73,21 +73,20 @@ curl http://127.0.0.1:8080/api/sessions
 ```bash
 # Test session-start hook
 echo '{"session_id":"test-123","source":"startup"}' | \
-  ANTHROPIC_API_KEY="sk-ant-test" ./session-start.sh
+  ANTHROPIC_API_KEY="sk-ant-test" node session-start.js
 
 # Test session-end hook
 echo '{"session_id":"test-123","reason":"logout"}' | \
-  ANTHROPIC_API_KEY="sk-ant-test" ./session-end.sh
+  ANTHROPIC_API_KEY="sk-ant-test" node session-end.js
 
 # Test cargo-fmt hook
 echo '{"name":"Write","input":{"file_path":"src/main.rs"}}' | \
-  ./cargo-fmt.sh
+  node cargo-fmt.js
 ```
 
 ---
 
 ## Resources
 
-- [Claude Code Hooks Guide](https://code.claude.com/docs/en/hooks-guide)
-- [Hooks Reference](https://code.claude.com/docs/en/hooks)
+- [Claude Code Hooks Guide](https://docs.anthropic.com/en/docs/claude-code/hooks)
 - [anthropic-spy README](../../README.md)

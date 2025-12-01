@@ -30,7 +30,7 @@ Initial stable release with full observability features.
 
 ### Configuration
 - **Config File** - `~/.config/anthropic-spy/config.toml`
-- **CLI Tool** - `anthropic-spy config` with --init, --show, --edit, --update, --reset
+- **CLI Tool** - `aspy config` with --init, --show, --edit, --update, --reset
 - **Multi-Client Routing** - Track multiple Claude Code instances with named clients
 - **Provider Backends** - Route to Anthropic, Foundry, Bedrock, etc.
 

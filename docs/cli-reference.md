@@ -1,18 +1,18 @@
 # CLI Reference
 
-anthropic-spy provides a command-line interface for configuration management.
+aspy provides a command-line interface for configuration management.
 
 ## Basic Usage
 
 ```bash
 # Run the proxy (normal operation)
-anthropic-spy
+aspy
 
 # Run in demo mode (mock events for testing)
-ANTHROPIC_SPY_DEMO=1 anthropic-spy
+ANTHROPIC_SPY_DEMO=1 aspy
 
 # Configuration management
-anthropic-spy config [OPTIONS]
+aspy config [OPTIONS]
 ```
 
 ## Configuration Commands
@@ -20,7 +20,7 @@ anthropic-spy config [OPTIONS]
 ### Interactive Setup
 
 ```bash
-anthropic-spy config --init
+aspy config --init
 ```
 
 Launches an interactive setup wizard that guides you through:
@@ -33,7 +33,7 @@ The wizard creates `~/.config/anthropic-spy/config.toml` with your choices.
 ### Show Configuration
 
 ```bash
-anthropic-spy config --show
+aspy config --show
 ```
 
 Displays the effective configuration after merging:
@@ -66,7 +66,7 @@ context_warning_thresholds = [60, 80, 85, 90, 95]
 ### Edit Configuration
 
 ```bash
-anthropic-spy config --edit
+aspy config --edit
 ```
 
 Opens the config file in your preferred editor (detected from `$EDITOR` or `$VISUAL`, falls back to `nano` on Unix, `notepad` on Windows).
@@ -76,7 +76,7 @@ If no config file exists, creates one with defaults first.
 ### Update Configuration
 
 ```bash
-anthropic-spy config --update
+aspy config --update
 ```
 
 Merges new defaults into your existing config file while preserving your customizations. Useful after upgrading anthropic-spy to get new configuration options.
@@ -90,7 +90,7 @@ Creates a backup at `config.toml.bak` before making changes.
 ### Reset Configuration
 
 ```bash
-anthropic-spy config --reset
+aspy config --reset
 ```
 
 Overwrites the config file with defaults. Prompts for confirmation if the file exists.
@@ -98,7 +98,7 @@ Overwrites the config file with defaults. Prompts for confirmation if the file e
 ### Show Config Path
 
 ```bash
-anthropic-spy config --path
+aspy config --path
 ```
 
 Prints the config file path:
@@ -170,16 +170,16 @@ Environment variables override config file values:
 
 ```bash
 # Run with different bind address
-ANTHROPIC_SPY_BIND=0.0.0.0:9090 anthropic-spy
+ANTHROPIC_SPY_BIND=0.0.0.0:9090 aspy
 
 # Run headless (no TUI, just proxy)
-ANTHROPIC_SPY_NO_TUI=1 anthropic-spy
+ANTHROPIC_SPY_NO_TUI=1 aspy
 
 # Debug logging
-RUST_LOG=debug anthropic-spy
+RUST_LOG=debug aspy
 
 # Demo mode with custom theme
-ANTHROPIC_SPY_DEMO=1 ANTHROPIC_SPY_THEME="Dracula" anthropic-spy
+ANTHROPIC_SPY_DEMO=1 ANTHROPIC_SPY_THEME="Dracula" aspy
 ```
 
 ## Configuration Options Reference
@@ -244,7 +244,7 @@ name = "Optional Display Name"
 ## Version Information
 
 ```bash
-anthropic-spy --version
+aspy --version
 ```
 
 Displays the current version number.

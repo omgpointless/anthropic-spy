@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/spy/session-start.sh",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/spy/session-start.js",
             "timeout": 10
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/spy/session-end.sh",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/spy/session-end.js",
             "timeout": 5
           }
         ]
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/spy/cargo-fmt.sh",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/spy/cargo-fmt.js",
             "timeout": 30
           }
         ]

@@ -1,4 +1,4 @@
-# Dockerfile.vhs - Docker image for recording anthropic-spy demo with VHS
+# Dockerfile.vhs - Docker image for recording aspy demo with VHS
 #
 # This builds on the VHS image (which has ffmpeg, ttyd, etc.) and adds Rust.
 # We then build the project inside the container so VHS can record it.
@@ -27,10 +27,13 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src/ ./src/
 
+# Copy themes for VHS (Spy Dark theme)
+COPY themes/ ./themes/
+
 # Build release binary (this takes a while but only happens once)
 RUN cargo build --release
 
-# The binary is now at /app/target/release/anthropic-spy
+# The binary is now at /app/target/release/aspy
 # VHS can run it directly
 
 # Default command - run VHS with a tape file
