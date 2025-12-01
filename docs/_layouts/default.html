@@ -26,6 +26,8 @@
       </a>
       <nav class="site-nav">
         <a href="{{ '/' | relative_url }}" {% if page.url == '/' %}class="active"{% endif %}>Home</a>
+        <a href="{{ '/features' | relative_url }}" {% if page.url == '/features' or page.url == '/features/' %}class="active"{% endif %}>Features</a>
+        <a href="{{ '/#docs' | relative_url }}">Docs</a>
         <a href="{{ '/blog/' | relative_url }}" {% if page.url contains '/blog' %}class="active"{% endif %}>Blog</a>
         <a href="https://github.com/omgpointless/anthropic-spy" target="_blank">GitHub</a>
       </nav>

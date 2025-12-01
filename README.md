@@ -48,7 +48,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:8080
 claude
 ```
 
-### Option 2: MCP Server
+### Optionally: MCP Server
 
 Add aspy to Claude Code's MCP servers:
 
@@ -60,7 +60,7 @@ This gives Claude Code access to session stats, events, and context window statu
 
 > **Note**: Requires the TUI proxy running to collect data.
 
-### Option 3: Claude Code Plugin
+### Optionally: Claude Code Plugin
 
 Install the plugin for slash commands:
 

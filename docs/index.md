@@ -65,7 +65,7 @@ Once you see the full picture—which tools get called, how tokens flow, when ca
 
 <p class="cta-subtle"><a href="{% post_url 2025-12-01-welcome-to-aspy %}">Read the story behind Aspy →</a></p>
 
-## Documentation
+<h2 id="docs">Documentation</h2>
 
 <div class="docs-grid">
   <div class="docs-section">

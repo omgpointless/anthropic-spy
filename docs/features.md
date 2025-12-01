@@ -41,7 +41,7 @@ Search across all your past sessions. When compaction wipes context, the logs re
 
 This isn't just logging—it's a searchable memory of your AI-assisted development journey.
 
-![Context Recall](images/features/context-recall.png)
+![Context Recall](images/features/context-recall-001.gif)
 
 > **Coming soon:** Local SQLite storage for faster querying and smarter context management. JSONL files will remain for portability; SQLite adds efficient indexing for recall at scale.
 
