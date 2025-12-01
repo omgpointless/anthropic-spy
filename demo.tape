@@ -65,7 +65,7 @@ Type "e"
 Sleep 500ms
 
 # Open settings with F3
-F3
+Type "F3"
 Sleep 1s
 
 # Navigate themes

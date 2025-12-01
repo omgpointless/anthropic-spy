@@ -220,9 +220,9 @@ impl Preset {
                     // Thinking always visible - responsive overrides adjust size by breakpoint
                     LayoutSlot::new(Panel::Thinking, SizeConstraint::Percent(35)).with_responsive(
                         ResponsiveRule::with_overrides(vec![
-                            (Breakpoint::UltraWide, SizeConstraint::Percent(30)),
+                            (Breakpoint::UltraWide, SizeConstraint::Percent(35)),
                             (Breakpoint::Wide, SizeConstraint::Percent(35)),
-                            (Breakpoint::Normal, SizeConstraint::Percent(40)),
+                            (Breakpoint::Normal, SizeConstraint::Percent(35)),
                         ]),
                     ),
                 ]),
@@ -319,6 +319,158 @@ impl Preset {
             ],
         }
     }
+
+    /// "Minimal" preset - events only, no thinking panel
+    /// Maximum real estate for event list, perfect for split terminals
+    pub fn minimal() -> Self {
+        use super::scroll::FocusablePanel;
+        Self {
+            name: "minimal".to_string(),
+
+            shell: ShellConfig {
+                header: vec![LayoutSlot::new(Panel::Title, SizeConstraint::Fixed(3))],
+                footer: vec![
+                    LayoutSlot::new(Panel::Logs, SizeConstraint::Fixed(4)),
+                    LayoutSlot::new(Panel::ContextBar, SizeConstraint::Fixed(1)),
+                    LayoutSlot::new(Panel::Status, SizeConstraint::Fixed(2)),
+                ],
+            },
+
+            events_view: ViewLayout {
+                // Events take everything - no thinking panel
+                layout: Layout::horizontal(vec![
+                    LayoutSlot::new(Panel::Events, SizeConstraint::Percent(100)),
+                ]),
+            },
+
+            stats_view: ViewLayout {
+                layout: Layout::vertical(vec![LayoutSlot::new(Panel::Stats, SizeConstraint::Fill)]),
+            },
+
+            settings_view: None,
+
+            focus_order: vec![
+                FocusablePanel::Events,
+                FocusablePanel::Logs,
+            ],
+        }
+    }
+
+    /// "Focus" preset - thinking panel dominates
+    /// For deep-diving into Claude's reasoning chain
+    pub fn focus() -> Self {
+        use super::scroll::FocusablePanel;
+        Self {
+            name: "focus".to_string(),
+
+            shell: ShellConfig {
+                header: vec![LayoutSlot::new(Panel::Title, SizeConstraint::Fixed(3))],
+                footer: vec![
+                    LayoutSlot::new(Panel::Logs, SizeConstraint::Fixed(4)),
+                    LayoutSlot::new(Panel::ContextBar, SizeConstraint::Fixed(1)),
+                    LayoutSlot::new(Panel::Status, SizeConstraint::Fixed(2)),
+                ],
+            },
+
+            events_view: ViewLayout {
+                // Thinking takes 80%, events get minimal strip
+                layout: Layout::horizontal(vec![
+                    LayoutSlot::new(Panel::Events, SizeConstraint::Percent(20)),
+                    LayoutSlot::new(Panel::Thinking, SizeConstraint::Percent(80)),
+                ]),
+            },
+
+            stats_view: ViewLayout {
+                layout: Layout::vertical(vec![LayoutSlot::new(Panel::Stats, SizeConstraint::Fill)]),
+            },
+
+            settings_view: None,
+
+            focus_order: vec![
+                FocusablePanel::Events,
+                FocusablePanel::Thinking,
+                FocusablePanel::Logs,
+            ],
+        }
+    }
+
+    /// "Compact" preset - optimized for narrow terminals
+    /// Reduced chrome, tighter spacing
+    pub fn compact() -> Self {
+        use super::scroll::FocusablePanel;
+        Self {
+            name: "compact".to_string(),
+
+            shell: ShellConfig {
+                // Smaller title
+                header: vec![LayoutSlot::new(Panel::Title, SizeConstraint::Fixed(2))],
+                footer: vec![
+                    // Minimal logs - just 3 lines
+                    LayoutSlot::new(Panel::Logs, SizeConstraint::Fixed(3)),
+                    LayoutSlot::new(Panel::ContextBar, SizeConstraint::Fixed(1)),
+                    LayoutSlot::new(Panel::Status, SizeConstraint::Fixed(1)),
+                ],
+            },
+
+            events_view: ViewLayout {
+                // Vertical stack works better in narrow terminals
+                layout: Layout::vertical(vec![
+                    LayoutSlot::new(Panel::Events, SizeConstraint::Percent(60)),
+                    LayoutSlot::new(Panel::Thinking, SizeConstraint::Percent(40)),
+                ]),
+            },
+
+            stats_view: ViewLayout {
+                layout: Layout::vertical(vec![LayoutSlot::new(Panel::Stats, SizeConstraint::Fill)]),
+            },
+
+            settings_view: None,
+
+            focus_order: vec![
+                FocusablePanel::Events,
+                FocusablePanel::Thinking,
+                FocusablePanel::Logs,
+            ],
+        }
+    }
+
+    /// "Balanced" preset - equal 50/50 split
+    /// When both panels are equally important
+    pub fn balanced() -> Self {
+        use super::scroll::FocusablePanel;
+        Self {
+            name: "balanced".to_string(),
+
+            shell: ShellConfig {
+                header: vec![LayoutSlot::new(Panel::Title, SizeConstraint::Fixed(3))],
+                footer: vec![
+                    LayoutSlot::new(Panel::Logs, SizeConstraint::Fixed(6)),
+                    LayoutSlot::new(Panel::ContextBar, SizeConstraint::Fixed(1)),
+                    LayoutSlot::new(Panel::Status, SizeConstraint::Fixed(2)),
+                ],
+            },
+
+            events_view: ViewLayout {
+                // True 50/50 split
+                layout: Layout::horizontal(vec![
+                    LayoutSlot::new(Panel::Events, SizeConstraint::Percent(50)),
+                    LayoutSlot::new(Panel::Thinking, SizeConstraint::Percent(50)),
+                ]),
+            },
+
+            stats_view: ViewLayout {
+                layout: Layout::vertical(vec![LayoutSlot::new(Panel::Stats, SizeConstraint::Fill)]),
+            },
+
+            settings_view: None,
+
+            focus_order: vec![
+                FocusablePanel::Events,
+                FocusablePanel::Thinking,
+                FocusablePanel::Logs,
+            ],
+        }
+    }
 }
 
 /// Get preset by name
@@ -326,6 +478,10 @@ pub fn get_preset(name: &str) -> Preset {
     match name.to_lowercase().as_str() {
         "reasoning" => Preset::reasoning(),
         "debug" => Preset::debug(),
+        "minimal" => Preset::minimal(),
+        "focus" => Preset::focus(),
+        "compact" => Preset::compact(),
+        "balanced" => Preset::balanced(),
         _ => Preset::classic(), // Default fallback
     }
 }

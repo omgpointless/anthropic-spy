@@ -40,6 +40,14 @@ title: Home
     <h3>Thinking Blocks</h3>
     <p>Peek into Claude's reasoning process. Understand the "why" behind the actions.</p>
   </div>
+  <div class="feature-card">
+    <h3>32 Themes & Custom</h3>
+    <p>Make your terminal beautiful. Built-in themes from Dracula to Solarized, plus full TOML custom theme support.</p>
+  </div>
+  <div class="feature-card">
+    <h3>Context Recall (MCP)</h3>
+    <p>Search past sessions. Let new Claude instances recall what previous ones discovered—context that survives compaction.</p>
+  </div>
 </div>
 
 ## Why Use It?

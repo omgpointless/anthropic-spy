@@ -25,6 +25,10 @@ Session analytics at a glance with ratatui widgets:
 
 Press `s` to switch to Stats view, `Tab` to cycle through tabs.
 
+## Context Recall
+
+![Context Recall](images/features/context-recall.png)
+
 ## Context Warnings
 
 <!-- TODO: Add screenshot -->
