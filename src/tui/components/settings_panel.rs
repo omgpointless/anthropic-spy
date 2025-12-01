@@ -145,6 +145,11 @@ impl SettingsPanel {
         self.theme_list.sync_themes(theme_count, viewport_height);
     }
 
+    /// Scroll to and select the current theme (call when entering Settings)
+    pub fn scroll_to_current_theme(&mut self, themes: &[String], current_theme: &str) {
+        self.theme_list.scroll_to_theme(themes, current_theme);
+    }
+
     /// Handle key input for Layout options (up/down selection)
     fn handle_layout_key(&mut self, key: KeyEvent) -> Handled {
         const PRESET_COUNT: usize = 3; // classic, reasoning, debug

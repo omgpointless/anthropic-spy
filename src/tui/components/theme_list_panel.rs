@@ -80,6 +80,15 @@ impl ThemeListPanel {
         self.ensure_visible();
     }
 
+    /// Scroll to and select the theme matching the given name
+    /// Call this when entering settings to show the current theme
+    pub fn scroll_to_theme(&mut self, themes: &[String], current_theme: &str) {
+        if let Some(index) = themes.iter().position(|t| t == current_theme) {
+            self.selected = index;
+            self.ensure_visible();
+        }
+    }
+
     /// Total item count (themes + optional bg toggle)
     fn total_items(&self) -> usize {
         if self.include_bg_toggle {

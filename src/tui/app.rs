@@ -300,6 +300,13 @@ impl App {
         self.modal = None; // Close any modal when switching views
         self.focused = FocusablePanel::Events;
         self.detail_panel.reset();
+
+        // When entering Settings, scroll theme list to current theme
+        if view == View::Settings {
+            let themes = Theme::list_available();
+            self.settings_panel
+                .scroll_to_current_theme(&themes, &self.theme.name);
+        }
     }
 
     /// Cycle focus to next panel (Tab)

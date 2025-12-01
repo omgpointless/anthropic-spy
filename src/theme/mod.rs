@@ -445,7 +445,7 @@ impl Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        Self::by_name("One Half Dark")
+        Self::by_name("Spy Dark")
     }
 }
 

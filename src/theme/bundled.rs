@@ -12,6 +12,14 @@ pub struct BundledTheme {
 /// All bundled themes
 pub const BUNDLED_THEMES: &[BundledTheme] = &[
     BundledTheme {
+        filename: "Spy_Dark.toml",
+        content: SPY_DARK,
+    },
+    BundledTheme {
+        filename: "Spy_Light.toml",
+        content: SPY_LIGHT,
+    },
+    BundledTheme {
         filename: "One_Half_Dark.toml",
         content: ONE_HALF_DARK,
     },
@@ -136,6 +144,8 @@ pub const BUNDLED_THEMES: &[BundledTheme] = &[
 /// List bundled theme names (for display)
 pub fn list_bundled_themes() -> Vec<&'static str> {
     vec![
+        "Spy Dark",
+        "Spy Light",
         "One Half Dark",
         "Dracula",
         "Catppuccin Mocha",
@@ -172,6 +182,104 @@ pub fn list_bundled_themes() -> Vec<&'static str> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme TOML strings
 // ─────────────────────────────────────────────────────────────────────────────
+
+pub const SPY_DARK: &str = r##"# Spy Dark theme for anthropic-spy
+# Workshop warmth with Observatory clarity
+# "I can see clearly, and I'm comfortable here"
+
+[meta]
+name = "Spy Dark"
+version = 1
+author = "anthropic-spy"
+
+[ui]
+background = "#28292d"
+foreground = "#d4cfc9"
+border = "#3a3b40"
+border_focused = "#c9a66b"
+title = "#c9a66b"
+status_bar = "#c9a66b"
+selection_bg = "#3d3834"
+selection_fg = "#e8e4df"
+muted = "#8a8279"
+border_type = "rounded"
+
+[events]
+tool_call = "#5da9a1"
+tool_result_ok = "#8fad5c"
+tool_result_fail = "#c75f4a"
+request = "#6b98b8"
+response = "#a88fad"
+error = "#c75f4a"
+thinking = "#a88fad"
+api_usage = "#8a8279"
+headers = "#8a8279"
+rate_limit = "#8a8279"
+context_compact = "#d4a54a"
+
+[context_bar]
+fill = "#5da9a1"
+warn = "#d4a54a"
+danger = "#c75f4a"
+
+[panels]
+events = "#6b98b8"
+thinking = "#a88fad"
+logs = "#8fad5c"
+
+[code]
+inline = "#e8b87a"
+block = "#9ca8b4"
+"##;
+
+pub const SPY_LIGHT: &str = r##"# Spy Light theme for anthropic-spy
+# Soft observatory, gentle workshop
+# "Pleasant to read, never straining"
+
+[meta]
+name = "Spy Light"
+version = 1
+author = "anthropic-spy"
+
+[ui]
+background = "#faf6f0"
+foreground = "#5c5650"
+border = "#cdc4b8"
+border_focused = "#c4784a"
+title = "#c4784a"
+status_bar = "#c4784a"
+selection_bg = "#ede6db"
+selection_fg = "#3d3834"
+muted = "#857c72"
+border_type = "rounded"
+
+[events]
+tool_call = "#3d8a84"
+tool_result_ok = "#6a8f4a"
+tool_result_fail = "#b85a4a"
+request = "#4a7a99"
+response = "#8a6a8f"
+error = "#b85a4a"
+thinking = "#8a6a8f"
+api_usage = "#7a7268"
+headers = "#7a7268"
+rate_limit = "#7a7268"
+context_compact = "#c4944a"
+
+[context_bar]
+fill = "#3d8a84"
+warn = "#c4944a"
+danger = "#b85a4a"
+
+[panels]
+events = "#4a7a99"
+thinking = "#8a6a8f"
+logs = "#6a8f4a"
+
+[code]
+inline = "#c4784a"
+block = "#6a7880"
+"##;
 
 pub const ONE_HALF_DARK: &str = r##"# One Half Dark theme for anthropic-spy
 # A clean, modern dark theme (default)
