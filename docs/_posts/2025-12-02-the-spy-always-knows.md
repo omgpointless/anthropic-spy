@@ -2,6 +2,7 @@
 layout: post
 title: "The Spy Always Knows"
 date: 2025-12-02
+tags: [story]
 ---
 
 One of Aspy's features is the Thinking panel. When Claude uses extended thinking, you see it—the internal reasoning, the weighing of options, the moments of uncertainty. It's fascinating to watch, like reading someone's inner monologue in real-time.
