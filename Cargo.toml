@@ -55,7 +55,7 @@ pulldown-cmark = "0.10"                                         # Streaming mark
 arboard = "3"                                                   # Cross-platform clipboard (Windows/macOS/Linux)
 
 [[bin]]
-name = "anthropic-spy"
+name = "aspy"
 path = "src/main.rs"
 
 # Release profile - optimized for distribution
