@@ -13,7 +13,7 @@ pub mod augmentation;
 pub mod sessions;
 pub mod sse;
 
-use crate::config::Config;
+use crate::config::{ClientsConfig, Config};
 use crate::events::{generate_id, ProxyEvent};
 use crate::parser::models::CapturedHeaders;
 use crate::parser::Parser;
@@ -53,7 +53,7 @@ pub struct ProxyState {
     event_tx_tui: mpsc::Sender<ProxyEvent>,
     /// Channel for sending events to storage
     event_tx_storage: mpsc::Sender<ProxyEvent>,
-    /// Target API URL
+    /// Target API URL (default, used when no client routing configured)
     api_url: String,
     /// Shared buffer for streaming thinking content to TUI
     streaming_thinking: StreamingThinking,
@@ -69,6 +69,8 @@ pub struct ProxyState {
     pub sessions: api::SharedSessions,
     /// Log directory for session log search
     pub log_dir: std::path::PathBuf,
+    /// Client and provider configuration for multi-user routing
+    clients: ClientsConfig,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -146,6 +148,23 @@ pub async fn start_proxy(
         );
     }
 
+    // Log client routing config if present
+    if config.clients.is_configured() {
+        tracing::info!(
+            "Client routing enabled: {} client(s), {} provider(s)",
+            config.clients.clients.len(),
+            config.clients.providers.len()
+        );
+        for (id, client) in &config.clients.clients {
+            tracing::info!(
+                "  Client '{}': {} -> provider '{}'",
+                id,
+                client.name,
+                client.provider
+            );
+        }
+    }
+
     let state = ProxyState {
         client,
         parser: Parser::new(),
@@ -159,6 +178,7 @@ pub async fn start_proxy(
         events: shared.events,
         sessions: shared.sessions,
         log_dir: config.log_dir.clone(),
+        clients: config.clients.clone(),
     };
 
     // Build the router - API endpoints + proxy handler
@@ -218,6 +238,78 @@ impl ProxyState {
     }
 }
 
+/// Result of extracting client routing from a path
+struct ClientRouting {
+    /// Client ID (if matched)
+    client_id: Option<String>,
+    /// Base URL to forward to
+    base_url: String,
+    /// API path (with client prefix stripped)
+    api_path: String,
+}
+
+/// Extract client routing information from request path
+///
+/// If clients are configured and the path starts with a known client ID,
+/// routes to that client's provider. Otherwise falls back to default api_url.
+///
+/// Examples:
+///   /dev-1/v1/messages -> client_id="dev-1", api_path="/v1/messages"
+///   /v1/messages -> client_id=None, api_path="/v1/messages"
+fn extract_client_routing(path: &str, clients: &ClientsConfig, default_api_url: &str) -> ClientRouting {
+    // Only try client routing if clients are configured
+    if !clients.is_configured() {
+        return ClientRouting {
+            client_id: None,
+            base_url: default_api_url.to_string(),
+            api_path: path.to_string(),
+        };
+    }
+
+    // Path format: /{client_id}/v1/messages...
+    // First segment after leading / is the potential client ID
+    let segments: Vec<&str> = path.trim_start_matches('/').splitn(2, '/').collect();
+
+    if segments.is_empty() {
+        return ClientRouting {
+            client_id: None,
+            base_url: default_api_url.to_string(),
+            api_path: path.to_string(),
+        };
+    }
+
+    let potential_client_id = segments[0];
+
+    // Check if this is a configured client
+    if let Some(base_url) = clients.get_client_base_url(potential_client_id) {
+        let api_path = if segments.len() > 1 {
+            format!("/{}", segments[1])
+        } else {
+            "/".to_string()
+        };
+
+        tracing::debug!(
+            "Client routing: '{}' -> base_url='{}', api_path='{}'",
+            potential_client_id,
+            base_url,
+            api_path
+        );
+
+        return ClientRouting {
+            client_id: Some(potential_client_id.to_string()),
+            base_url: base_url.to_string(),
+            api_path,
+        };
+    }
+
+    // Not a known client - use default routing
+    ClientRouting {
+        client_id: None,
+        base_url: default_api_url.to_string(),
+        api_path: path.to_string(),
+    }
+}
+
 /// Main proxy handler - intercepts and forwards all requests
 ///
 /// For SSE (streaming) responses: Streams chunks directly to client while
@@ -235,10 +327,17 @@ async fn proxy_handler(
     let method = req.method().clone();
     let uri = req.uri().clone();
     let headers = req.headers().clone();
-    let is_messages_endpoint = uri.path().contains("/messages");
 
-    // Extract user_id early for session tracking (before any events are sent)
-    let user_id = extract_user_id(&headers);
+    // Extract client routing from path (before we consume the request)
+    let routing = extract_client_routing(uri.path(), &state.clients, &state.api_url);
+
+    // Use client_id for user identification if available, otherwise fall back to API key hash
+    let user_id = routing
+        .client_id
+        .clone()
+        .or_else(|| extract_user_id(&headers));
+
+    let is_messages_endpoint = routing.api_path.contains("/messages");
 
     // Backfill session user_id immediately (before any events are sent)
     // This ensures events go to the hook-created session, not a new implicit one
@@ -248,7 +347,13 @@ async fn proxy_handler(
         }
     }
 
-    tracing::debug!("Proxying {} {}", method, uri);
+    tracing::debug!(
+        "Proxying {} {} -> {} (client: {:?})",
+        method,
+        uri,
+        routing.base_url,
+        routing.client_id
+    );
 
     // Read the request body (with size limit)
     let body_bytes = axum::body::to_bytes(req.into_body(), MAX_REQUEST_BODY_SIZE)
@@ -262,7 +367,7 @@ async fn proxy_handler(
         None
     };
 
-    // Emit request event
+    // Emit request event (use original path for logging, not stripped path)
     state
         .send_event(
             ProxyEvent::Request {
@@ -291,8 +396,8 @@ async fn proxy_handler(
         }
     }
 
-    // Build the forward URL
-    let forward_url = format!("{}{}", state.api_url, uri.path());
+    // Build the forward URL using client routing
+    let forward_url = format!("{}{}", routing.base_url, routing.api_path);
     let query = uri.query().unwrap_or("");
     let forward_url = if query.is_empty() {
         forward_url
@@ -903,5 +1008,125 @@ impl IntoResponse for ProxyError {
             .status(status)
             .body(Body::from(message))
             .unwrap_or_else(|_| Response::new(Body::from("Internal error building error response")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{ClientConfig, ProviderConfig};
+    use std::collections::HashMap;
+
+    fn make_test_clients() -> ClientsConfig {
+        let mut clients = HashMap::new();
+        clients.insert(
+            "dev-1".to_string(),
+            ClientConfig {
+                name: "Dev Laptop".to_string(),
+                provider: "anthropic".to_string(),
+                tags: vec!["dev".to_string()],
+            },
+        );
+        clients.insert(
+            "ci".to_string(),
+            ClientConfig {
+                name: "CI Runner".to_string(),
+                provider: "foundry".to_string(),
+                tags: vec![],
+            },
+        );
+
+        let mut providers = HashMap::new();
+        providers.insert(
+            "anthropic".to_string(),
+            ProviderConfig {
+                base_url: "https://api.anthropic.com".to_string(),
+                name: Some("Anthropic Direct".to_string()),
+            },
+        );
+        providers.insert(
+            "foundry".to_string(),
+            ProviderConfig {
+                base_url: "https://foundry.example.com".to_string(),
+                name: Some("Foundry".to_string()),
+            },
+        );
+
+        ClientsConfig { clients, providers }
+    }
+
+    #[test]
+    fn test_client_routing_with_known_client() {
+        let clients = make_test_clients();
+        let default_url = "https://default.example.com";
+
+        let routing = extract_client_routing("/dev-1/v1/messages", &clients, default_url);
+
+        assert_eq!(routing.client_id, Some("dev-1".to_string()));
+        assert_eq!(routing.base_url, "https://api.anthropic.com");
+        assert_eq!(routing.api_path, "/v1/messages");
+    }
+
+    #[test]
+    fn test_client_routing_with_different_client() {
+        let clients = make_test_clients();
+        let default_url = "https://default.example.com";
+
+        let routing = extract_client_routing("/ci/v1/messages", &clients, default_url);
+
+        assert_eq!(routing.client_id, Some("ci".to_string()));
+        assert_eq!(routing.base_url, "https://foundry.example.com");
+        assert_eq!(routing.api_path, "/v1/messages");
+    }
+
+    #[test]
+    fn test_client_routing_unknown_client_uses_default() {
+        let clients = make_test_clients();
+        let default_url = "https://default.example.com";
+
+        // Unknown client ID should fall back to default
+        let routing = extract_client_routing("/unknown/v1/messages", &clients, default_url);
+
+        assert_eq!(routing.client_id, None);
+        assert_eq!(routing.base_url, default_url);
+        assert_eq!(routing.api_path, "/unknown/v1/messages");
+    }
+
+    #[test]
+    fn test_client_routing_no_client_prefix() {
+        let clients = make_test_clients();
+        let default_url = "https://default.example.com";
+
+        // Standard path without client prefix
+        let routing = extract_client_routing("/v1/messages", &clients, default_url);
+
+        assert_eq!(routing.client_id, None);
+        assert_eq!(routing.base_url, default_url);
+        assert_eq!(routing.api_path, "/v1/messages");
+    }
+
+    #[test]
+    fn test_client_routing_empty_clients_config() {
+        let clients = ClientsConfig::default();
+        let default_url = "https://default.example.com";
+
+        // With no clients configured, always use default
+        let routing = extract_client_routing("/dev-1/v1/messages", &clients, default_url);
+
+        assert_eq!(routing.client_id, None);
+        assert_eq!(routing.base_url, default_url);
+        assert_eq!(routing.api_path, "/dev-1/v1/messages");
+    }
+
+    #[test]
+    fn test_client_routing_preserves_deep_paths() {
+        let clients = make_test_clients();
+        let default_url = "https://default.example.com";
+
+        let routing =
+            extract_client_routing("/dev-1/v1/messages/count_tokens", &clients, default_url);
+
+        assert_eq!(routing.client_id, Some("dev-1".to_string()));
+        assert_eq!(routing.api_path, "/v1/messages/count_tokens");
     }
 }

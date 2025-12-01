@@ -6,6 +6,7 @@
 // 3. Built-in defaults (lowest priority)
 
 use serde::Deserialize;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
@@ -74,6 +75,97 @@ impl Default for LoggingConfig {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Client and Provider Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Client profile for multi-user differentiation
+///
+/// Clients are identified by a path prefix in the URL:
+///   http://localhost:8080/{client_id}/v1/messages
+///
+/// Each client maps to a provider backend and has optional metadata.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClientConfig {
+    /// Human-readable name for display in TUI
+    pub name: String,
+
+    /// Provider backend to route requests to (references [providers.X])
+    pub provider: String,
+
+    /// Optional tags for filtering/grouping
+    #[allow(dead_code)] // Reserved for TUI filtering/display
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+/// Provider backend configuration
+///
+/// Defines where to forward API requests for a given provider.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ProviderConfig {
+    /// Base URL for the provider's API (e.g., "https://api.anthropic.com")
+    pub base_url: String,
+
+    /// Optional display name
+    #[allow(dead_code)] // Reserved for TUI display
+    pub name: Option<String>,
+}
+
+impl ProviderConfig {
+    /// Get display name (falls back to base_url host)
+    #[allow(dead_code)] // Reserved for TUI display
+    pub fn display_name(&self) -> &str {
+        self.name.as_deref().unwrap_or(&self.base_url)
+    }
+}
+
+/// Container for all client configurations
+#[derive(Debug, Clone, Default)]
+pub struct ClientsConfig {
+    /// Map of client_id -> ClientConfig
+    pub clients: HashMap<String, ClientConfig>,
+
+    /// Map of provider_id -> ProviderConfig
+    pub providers: HashMap<String, ProviderConfig>,
+}
+
+impl ClientsConfig {
+    /// Look up a client by ID
+    pub fn get_client(&self, client_id: &str) -> Option<&ClientConfig> {
+        self.clients.get(client_id)
+    }
+
+    /// Get the provider config for a client
+    pub fn get_client_provider(&self, client_id: &str) -> Option<&ProviderConfig> {
+        self.get_client(client_id)
+            .and_then(|c| self.providers.get(&c.provider))
+    }
+
+    /// Get the base URL for a client (for routing)
+    pub fn get_client_base_url(&self, client_id: &str) -> Option<&str> {
+        self.get_client_provider(client_id)
+            .map(|p| p.base_url.as_str())
+    }
+
+    /// Check if a client ID is configured
+    #[allow(dead_code)] // Reserved for token validation
+    pub fn has_client(&self, client_id: &str) -> bool {
+        self.clients.contains_key(client_id)
+    }
+
+    /// List all configured client IDs
+    #[allow(dead_code)] // Reserved for API listing endpoint
+    pub fn client_ids(&self) -> impl Iterator<Item = &String> {
+        self.clients.keys()
+    }
+
+    /// Check if clients are configured (not empty)
+    pub fn is_configured(&self) -> bool {
+        !self.clients.is_empty()
+    }
+}
+
 /// Application configuration
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -112,6 +204,9 @@ pub struct Config {
 
     /// Logging configuration
     pub logging: LoggingConfig,
+
+    /// Client and provider configuration for multi-user routing
+    pub clients: ClientsConfig,
 }
 
 /// Feature flags as loaded from config file
@@ -154,6 +249,14 @@ struct FileConfig {
 
     /// Optional [logging] section
     logging: Option<FileLogging>,
+
+    /// Optional [clients.X] sections for multi-user routing
+    #[serde(default)]
+    clients: HashMap<String, ClientConfig>,
+
+    /// Optional [providers.X] sections for backend configuration
+    #[serde(default)]
+    providers: HashMap<String, ProviderConfig>,
 }
 
 impl Config {
@@ -216,6 +319,31 @@ impl Config {
 # Logging configuration
 # [logging]
 # level = "info"  # trace, debug, info, warn, error (RUST_LOG env var overrides this)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Multi-Client Routing (optional)
+# ─────────────────────────────────────────────────────────────────────────────
+# Configure multiple clients with different provider backends.
+# Each client is accessed via URL prefix: http://localhost:8080/{client_id}/v1/messages
+#
+# Example: Set ANTHROPIC_BASE_URL=http://localhost:8080/dev-1 in Claude Code
+#
+# [clients.dev-1]
+# name = "Dev Laptop"
+# provider = "anthropic"
+# tags = ["dev", "primary"]
+#
+# [clients.ci]
+# name = "CI Runner"
+# provider = "foundry"
+#
+# [providers.anthropic]
+# base_url = "https://api.anthropic.com"
+# name = "Anthropic Direct"
+#
+# [providers.foundry]
+# base_url = "https://api.anthropic.com"  # or your Foundry endpoint
+# name = "Foundry"
 "#;
 
         // Write template (ignore errors - config is optional)
@@ -387,6 +515,21 @@ level = "{log_level}"
             level: file_logging.level.unwrap_or_else(|| "info".to_string()),
         };
 
+        // Client/provider config: file only
+        let clients = ClientsConfig {
+            clients: file.clients,
+            providers: file.providers,
+        };
+
+        // Log client config if present
+        if clients.is_configured() {
+            eprintln!(
+                "Loaded {} client(s) and {} provider(s) from config",
+                clients.clients.len(),
+                clients.providers.len()
+            );
+        }
+
         Self {
             bind_addr,
             api_url,
@@ -400,6 +543,7 @@ level = "{log_level}"
             features,
             augmentation,
             logging,
+            clients,
         }
     }
 }
@@ -419,6 +563,7 @@ impl Default for Config {
             features: Features::default(),
             augmentation: Augmentation::default(),
             logging: LoggingConfig::default(),
+            clients: ClientsConfig::default(),
         }
     }
 }
