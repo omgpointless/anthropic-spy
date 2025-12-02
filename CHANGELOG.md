@@ -1,67 +1,49 @@
-# Changelog
+##  (2025-12-02)
 
-All notable changes to this project will be documented in this file.
+* docs: add "Getting Started" guide, new plugin docs, and refine UI/UX ([6db36b0](https://github.com/omgpointless/aspy/commit/6db36b0))
+* docs: add `recover.md` for context recovery workflows ([9e4a3e0](https://github.com/omgpointless/aspy/commit/9e4a3e0))
+* docs: add community templates and contribution guidelines ([f07e276](https://github.com/omgpointless/aspy/commit/f07e276))
+* docs: add custom fonts, refine header, and update styling ([94fbec8](https://github.com/omgpointless/aspy/commit/94fbec8))
+* docs: add detailed bug report for GITHUB_TOKEN release creation issue ([35153dc](https://github.com/omgpointless/aspy/commit/35153dc))
+* docs: add GitHub Pages blog with Spy Dark theme ([006bf8b](https://github.com/omgpointless/aspy/commit/006bf8b)), closes [#c9a66b](https://github.com/omgpointless/aspy/issues/c9a66b) [#5da9a1](https://github.com/omgpointless/aspy/issues/5da9a1) [#28292d](https://github.com/omgpointless/aspy/issues/28292d)
+* docs: add new blog post, update logo, and enhance styles ([2206ace](https://github.com/omgpointless/aspy/commit/2206ace))
+* docs: add tags to blog post and update CI to ignore docs and markdown changes ([0375c57](https://github.com/omgpointless/aspy/commit/0375c57))
+* docs: comprehensive documentation pass for v0.2.0 ([95220bf](https://github.com/omgpointless/aspy/commit/95220bf))
+* docs: configure local Jekyll development and add new assets ([145790f](https://github.com/omgpointless/aspy/commit/145790f))
+* docs: enhance navigation, refactor headings, and update assets ([acd011d](https://github.com/omgpointless/aspy/commit/acd011d))
+* docs: enhance styles with new elements and refinements ([c258718](https://github.com/omgpointless/aspy/commit/c258718))
+* docs: fix version numbers to v0.1.0 ([1fdc898](https://github.com/omgpointless/aspy/commit/1fdc898))
+* docs: update documentation structure and add front matter for Jekyll ([83aadef](https://github.com/omgpointless/aspy/commit/83aadef))
+* docs: update session tracking to multi-client routing architecture ([4d22e3b](https://github.com/omgpointless/aspy/commit/4d22e3b))
+* docs: update title logic, improve feature links, and refine styles ([cf485f1](https://github.com/omgpointless/aspy/commit/cf485f1))
+* docs(blog): add Aspy logo to hero section ([e983e4c](https://github.com/omgpointless/aspy/commit/e983e4c))
+* docs(features): add screenshots and gifs for feature examples ([c3970a6](https://github.com/omgpointless/aspy/commit/c3970a6))
+* docs(features): refine feature descriptions and enhance documentation ([44a430f](https://github.com/omgpointless/aspy/commit/44a430f))
+* refactor: rebrand project from "anthropic-spy" to "Aspy" ([0351ad9](https://github.com/omgpointless/aspy/commit/0351ad9))
+* chore: add .npmignore and initial RFC for event pipeline and lifestats storage ([ada5732](https://github.com/omgpointless/aspy/commit/ada5732))
+* chore: rename project references from "anthropic-spy" to "aspy" ([8b017a1](https://github.com/omgpointless/aspy/commit/8b017a1))
+* chore: rename remaining "anthropic-spy" references to "aspy" ([16dfb0c](https://github.com/omgpointless/aspy/commit/16dfb0c))
+* chore(git): add .gitattributes for line endings and binary file handling ([05b131f](https://github.com/omgpointless/aspy/commit/05b131f))
+* chore(hooks): migrate shell scripts to Node.js and standardize hook architecture ([ce34f6c](https://github.com/omgpointless/aspy/commit/ce34f6c))
+* chore(misc): update binary to aspy and fixed wrong plugin config for mcp server ([4ed7341](https://github.com/omgpointless/aspy/commit/4ed7341))
+* chore(style): reformat CLI messages and indentation for improved readability ([fc91186](https://github.com/omgpointless/aspy/commit/fc91186))
+* chore(style): reformat code for improved readability and consistency ([bb8dbcf](https://github.com/omgpointless/aspy/commit/bb8dbcf))
+* chore(style): reformat for consistent indentation and apply rustfmt cleanup across modules ([e2e2ae1](https://github.com/omgpointless/aspy/commit/e2e2ae1))
+* chore(style): reformat function signature for consistent indentation and readability ([4944290](https://github.com/omgpointless/aspy/commit/4944290))
+* chore(theme): remove bundled themes and related code from god bundle object and create individual bu ([42ac508](https://github.com/omgpointless/aspy/commit/42ac508))
+* feat: add mouse scrolling, fix SSE streaming, update dependencies ([154b262](https://github.com/omgpointless/aspy/commit/154b262))
+* feat: add plugin system, session tracking, stats panels, and clippy cleanup ([1a75030](https://github.com/omgpointless/aspy/commit/1a75030)), closes [hi#level](https://github.com/hi/issues/level)
+* feat: improve CLI configuration tool ([a96158c](https://github.com/omgpointless/aspy/commit/a96158c))
+* feat(presets): add new layout presets and improve responsiveness ([d418947](https://github.com/omgpointless/aspy/commit/d418947))
+* feat(proxy): add multi-client routing with provider backends ([8ed5bb4](https://github.com/omgpointless/aspy/commit/8ed5bb4))
+* feat(theme): add new "Spy Dark" and "Spy Light" themes with improved Settings integration ([5cc7470](https://github.com/omgpointless/aspy/commit/5cc7470))
+* feat(tui): add themes, stats view, and responsive layout for v0.1.0 ([8fd9e9f](https://github.com/omgpointless/aspy/commit/8fd9e9f))
+* fix(config): add multi-client and provider examples to generated config ([460c526](https://github.com/omgpointless/aspy/commit/460c526))
+* fix(parser): enable ToolResult correlation for SSE streaming ([9642c7d](https://github.com/omgpointless/aspy/commit/9642c7d))
+* Refactor: fix forgotten fmt and clippy, reviewed README.md and removed AI slop ([84210ff](https://github.com/omgpointless/aspy/commit/84210ff))
 
-## [0.1.0] - 2025-12-01
 
-Initial stable release with full observability features.
 
-### Core Observability
-- **Proxy Server** - Intercepts Claude Code ↔ Anthropic API traffic
-- **Tool Call Tracking** - Captures tool invocations with timing and correlation
-- **Thinking Blocks** - Dedicated panel showing Claude's extended thinking in real-time
-- **Token & Cost Tracking** - Cumulative session statistics with cost estimation
-- **SSE Streaming** - Proper delta accumulation for streaming responses
-- **JSON Lines Logging** - Session logs for post-hoc analysis
+## 0.1.0-alpha (2025-11-26)
 
-### Views & Statistics
-- **Views System** - Three main views (Events, Stats, Settings) with keyboard navigation
-- **Statistics View** - 5-tab dashboard with gauges, charts, and sparklines
-  - Overview tab: Session gauges and summary
-  - Models tab: API call distribution by model
-  - Tokens tab: Token usage breakdown
-  - Tools tab: Tool call frequency analysis
-  - Trends tab: Sparkline grid for metrics over time
-
-### Theme System
-- **32 Bundled Themes** - Spy Dark/Light, Dracula, Catppuccin, Nord, Gruvbox, etc.
-- **TOML Custom Themes** - Create your own themes with full semantic color control
-- **Runtime Switching** - Change themes via Settings view or config
-
-### Configuration
-- **Config File** - `~/.config/aspy/config.toml`
-- **CLI Tool** - `aspy config` with --init, --show, --edit, --update, --reset
-- **Multi-Client Routing** - Track multiple Claude Code instances with named clients
-- **Provider Backends** - Route to Anthropic, Foundry, Bedrock, etc.
-
-### REST API
-- `GET /api/stats` - Session statistics
-- `GET /api/events` - Event buffer with filtering
-- `GET /api/context` - Context window status
-- `GET /api/sessions` - Active session list
-- `POST /api/search` - Search past session logs
-
-### Documentation
-- `docs/api-reference.md` - Complete REST API documentation
-- `docs/themes.md` - Theme system guide
-- `docs/cli-reference.md` - CLI tool reference
-- `docs/views.md` - TUI views documentation
-- `docs/sessions.md` - Multi-client routing details
-
-## [0.1.0-alpha] - 2025-11-26
-
-Pre-release alpha.
-
-### Added
-- **Thinking block capture** - Dedicated panel showing Claude's reasoning in real-time
-- **Token & cost tracking** - Cumulative session statistics in status bar
-- **Demo mode** - Generate mock events for showcasing (`ASPY_DEMO=1`)
-- **SSE delta accumulation** - Proper handling of streaming API responses
-- Real-time TUI with tool calls, results, and API usage
-- JSON Lines logging with daily rotation
-- Vim-style navigation (j/k, arrow keys)
-- Multi-platform binaries (Windows, macOS, Linux)
-
-### Fixed
-- Tool calls showing empty `{}` inputs (SSE delta accumulation)
-- Demo mode graceful shutdown
+* Initial release v0.1.0-alpha: anthropic-spy TUI proxy ([20bfd6d](https://github.com/omgpointless/aspy/commit/20bfd6d))
