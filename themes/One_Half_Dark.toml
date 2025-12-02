@@ -1,10 +1,10 @@
-# One Half Dark theme for anthropic-spy
+# One Half Dark theme for Aspy
 # A clean, modern dark theme (default)
 
 [meta]
 name = "One Half Dark"
 version = 1
-author = "anthropic-spy"
+author = "Aspy"
 
 [ui]
 background = "#282c34"

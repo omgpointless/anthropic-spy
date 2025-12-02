@@ -1,6 +1,6 @@
 //! Tokyo Night - A clean, dark theme inspired by Tokyo at night
 
-pub const THEME: &str = r##"# Tokyo Night theme for anthropic-spy
+pub const THEME: &str = r##"# Tokyo Night theme for Aspy
 # A clean, dark theme inspired by Tokyo at night
 
 [meta]

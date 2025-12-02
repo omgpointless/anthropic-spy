@@ -1,5 +1,5 @@
 ---
-description: "View anthropic-spy session events"
+description: "View Aspy session events"
 argument-hint: "[limit] [type]"
 ---
 
@@ -19,4 +19,4 @@ Use the `aspy_events` MCP tool to query recent events from the current session.
 
 Display results showing timestamp, type, and relevant details for each event.
 
-**Note:** Requires anthropic-spy proxy to be running (default port 8080).
+**Note:** Requires Aspy proxy to be running (default port 8080).

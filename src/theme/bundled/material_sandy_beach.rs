@@ -1,6 +1,6 @@
 //! Material Sandy Beach - Warm cream light theme
 
-pub const THEME: &str = r##"# Material Sandy Beach theme for anthropic-spy
+pub const THEME: &str = r##"# Material Sandy Beach theme for Aspy
 # Warm cream light theme
 
 [meta]

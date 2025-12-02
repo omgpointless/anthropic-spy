@@ -140,7 +140,7 @@ name = "Azure AI Foundry"
 
 ### Team Observability
 
-**Problem:** Multiple team members want to use a shared anthropic-spy instance for visibility.
+**Problem:** Multiple team members want to use a shared Aspy instance for visibility.
 
 **Solution:** Create a client entry for each team member:
 

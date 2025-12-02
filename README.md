@@ -1,7 +1,7 @@
 ![Aspy (Anthropic Spy)](docs/images/aspy-header-logo.webp)
 
-[![CI](https://github.com/omgpointless/anthropic-spy/actions/workflows/ci.yml/badge.svg)](https://github.com/omgpointless/anthropic-spy/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/omgpointless/anthropic-spy?include_prereleases)](https://github.com/omgpointless/anthropic-spy/releases)
+[![CI](https://github.com/omgpointless/aspy/actions/workflows/ci.yml/badge.svg)](https://github.com/omgpointless/aspy/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/omgpointless/aspy?include_prereleases)](https://github.com/omgpointless/aspy/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![npm](https://img.shields.io/npm/v/aspy-mcp)](https://www.npmjs.com/package/aspy-mcp)
 
@@ -26,10 +26,10 @@ Aspy sits between Claude Code and the Anthropic API, intercepting all traffic an
 
 ### Option 1: TUI Proxy (Binary)
 
-Download from [GitHub Releases](https://github.com/omgpointless/anthropic-spy/releases) or build from source:
+Download from [GitHub Releases](https://github.com/omgpointless/aspy/releases) or build from source:
 
 ```bash
-cargo install --git https://github.com/omgpointless/anthropic-spy
+cargo install --git https://github.com/omgpointless/aspy
 ```
 
 Run the proxy:
@@ -65,7 +65,7 @@ This gives Claude Code access to session stats, events, and context window statu
 Install the plugin for slash commands:
 
 ```bash
-/plugin marketplace add omgpointless/anthropic-spy
+/plugin marketplace add omgpointless/aspy
 ```
 
 After restarting Claude Code, use `/aspy:stats` to query session metrics. The plugin also includes automatic `cargo fmt` hooks for Rust projects.

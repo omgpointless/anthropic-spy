@@ -77,7 +77,7 @@ Install the `aspy` Claude Code plugin to enable automatic `cargo fmt` on Rust fi
 
 ```bash
 # Install the plugin from the project directory
-/plugin marketplace add /mnt/c/Projects/anthropic-spy
+/plugin marketplace add /mnt/c/Projects/aspy
 
 # Restart Claude Code to load the plugin
 # The plugin provides /aspy:stats and /aspy:tempcontext commands

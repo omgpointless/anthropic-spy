@@ -1,6 +1,6 @@
 //! Monokai Soda - Vibrant variant with darker background
 
-pub const THEME: &str = r##"# Monokai Soda theme for anthropic-spy
+pub const THEME: &str = r##"# Monokai Soda theme for Aspy
 # Vibrant variant with darker background
 
 [meta]

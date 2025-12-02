@@ -1,6 +1,6 @@
 //! Nord - Arctic, bluish color palette
 
-pub const THEME: &str = r##"# Nord theme for anthropic-spy
+pub const THEME: &str = r##"# Nord theme for Aspy
 # Arctic, bluish color palette
 
 [meta]

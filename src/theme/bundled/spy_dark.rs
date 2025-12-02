@@ -1,14 +1,14 @@
-//! Spy Dark - The flagship theme for anthropic-spy
+//! Spy Dark - The flagship theme for Aspy
 //! Workshop warmth with Observatory clarity
 
-pub const THEME: &str = r##"# Spy Dark theme for anthropic-spy
+pub const THEME: &str = r##"# Spy Dark theme for Aspy
 # Workshop warmth with Observatory clarity
 # "I can see clearly, and I'm comfortable here"
 
 [meta]
 name = "Spy Dark"
 version = 1
-author = "anthropic-spy"
+author = "Aspy"
 
 [ui]
 background = "#28292d"

@@ -1,6 +1,6 @@
 # aspy-mcp
 
-MCP server for [aspy](https://github.com/omgpointless/anthropic-spy) — exposes session stats, events, and context window status to Claude Code.
+MCP server for [Aspy](https://github.com/omgpointless/aspy) — exposes session stats, events, and context window status to Claude Code.
 
 ## Installation
 
@@ -16,7 +16,7 @@ claude mcp add aspy -e ASPY_URL=http://192.168.1.100:8080 -- npx -y aspy-mcp
 
 ## Requirements
 
-- [aspy](https://github.com/omgpointless/anthropic-spy) running locally (default: `http://127.0.0.1:8080`)
+- [Aspy](https://github.com/omgpointless/aspy) running locally (default: `http://127.0.0.1:8080`)
 - Node.js 18+
 
 ## Available Tools

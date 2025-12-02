@@ -1,6 +1,6 @@
 //! Synthwave 84 - Retro neon synthwave theme
 
-pub const THEME: &str = r##"# Synthwave 84 theme for anthropic-spy
+pub const THEME: &str = r##"# Synthwave 84 theme for Aspy
 # Retro neon synthwave theme
 
 [meta]

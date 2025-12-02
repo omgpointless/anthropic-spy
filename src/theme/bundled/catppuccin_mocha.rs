@@ -1,6 +1,6 @@
 //! Catppuccin Mocha - Soothing pastel dark theme
 
-pub const THEME: &str = r##"# Catppuccin Mocha theme for anthropic-spy
+pub const THEME: &str = r##"# Catppuccin Mocha theme for Aspy
 # Soothing pastel dark theme
 
 [meta]

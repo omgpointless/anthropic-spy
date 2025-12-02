@@ -13,4 +13,4 @@ Display results with:
 - Usage percentage and token counts
 - Number of compacts this session
 
-**Note:** Requires anthropic-spy proxy to be running (default port 8080).
+**Note:** Requires Aspy proxy to be running (default port 8080).

@@ -1,6 +1,6 @@
 //! Dracula - Popular purple-accented dark theme
 
-pub const THEME: &str = r##"# Dracula theme for anthropic-spy
+pub const THEME: &str = r##"# Dracula theme for Aspy
 # Popular purple-accented dark theme
 
 [meta]

@@ -5,7 +5,7 @@ title: Themes
 
 # Theme System
 
-anthropic-spy includes a comprehensive theme system with 32 bundled themes and support for custom themes.
+Aspy includes a comprehensive theme system with 32 bundled themes and support for custom themes.
 
 ## Quick Start
 
@@ -163,7 +163,7 @@ block = "#9399b2"           # Fenced code block color
 
 ### Color Formats
 
-anthropic-spy supports two color formats:
+Aspy supports two color formats:
 
 **Hex Colors:**
 ```toml
@@ -204,7 +204,7 @@ The `border_type` option accepts:
 
 ## Theme Loading Priority
 
-When loading a theme, anthropic-spy checks in order:
+When loading a theme, Aspy checks in order:
 
 1. **External TOML** - `~/.config/aspy/themes/{theme_name}.toml`
 2. **Bundled TOML** - Compiled into the binary
@@ -233,7 +233,7 @@ The extraction only happens once (tracked by `.extracted_v2` marker file).
 
 1. Find the theme in `~/.config/aspy/themes/`
 2. Edit the TOML file
-3. Restart anthropic-spy or press `t` to reload themes
+3. Restart Aspy or press `t` to reload themes
 
 ### Creating from Scratch
 

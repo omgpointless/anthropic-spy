@@ -11,7 +11,7 @@ markdown: kramdown
 highlighter: rouge
 
 # URL settings (update these for your repo)
-baseurl: "/anthropic-spy"
+baseurl: "/aspy"
 url: "https://omgpointless.github.io"
 
 # Permalink structure for posts

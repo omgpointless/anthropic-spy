@@ -1,10 +1,10 @@
-# Monokai Pro theme for anthropic-spy
+# Monokai Pro theme for Aspy
 # Modern take on the classic Monokai
 
 [meta]
 name = "Monokai Pro"
 version = 1
-author = "anthropic-spy"
+author = "Aspy"
 
 [ui]
 background = "#2d2a2e"

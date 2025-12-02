@@ -1,6 +1,6 @@
 //! Ayu Mirage - Modern dark theme with soft colors
 
-pub const THEME: &str = r##"# Ayu Mirage theme for anthropic-spy
+pub const THEME: &str = r##"# Ayu Mirage theme for Aspy
 # Modern dark theme with soft colors
 
 [meta]

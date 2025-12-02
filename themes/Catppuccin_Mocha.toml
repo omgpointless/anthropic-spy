@@ -1,10 +1,10 @@
-# Catppuccin Mocha theme for anthropic-spy
+# Catppuccin Mocha theme for Aspy
 # Soothing pastel dark theme
 
 [meta]
 name = "Catppuccin Mocha"
 version = 1
-author = "anthropic-spy"
+author = "Aspy"
 
 [ui]
 background = "#1e1e2e"

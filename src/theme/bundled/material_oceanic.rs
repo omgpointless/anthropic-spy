@@ -1,6 +1,6 @@
 //! Material Oceanic - Cool blue-green dark theme
 
-pub const THEME: &str = r##"# Material Oceanic theme for anthropic-spy
+pub const THEME: &str = r##"# Material Oceanic theme for Aspy
 # Cool blue-green dark theme
 
 [meta]

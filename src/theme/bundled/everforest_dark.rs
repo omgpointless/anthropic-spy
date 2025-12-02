@@ -1,6 +1,6 @@
 //! Everforest Dark - Green nature-inspired dark theme, easy on the eyes
 
-pub const THEME: &str = r##"# Everforest Dark theme for anthropic-spy
+pub const THEME: &str = r##"# Everforest Dark theme for Aspy
 # Green nature-inspired dark theme, easy on the eyes
 
 [meta]

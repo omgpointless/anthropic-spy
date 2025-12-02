@@ -1,14 +1,14 @@
 //! Spy Light - Light variant of the flagship theme
 //! Soft observatory, gentle workshop
 
-pub const THEME: &str = r##"# Spy Light theme for anthropic-spy
+pub const THEME: &str = r##"# Spy Light theme for Aspy
 # Soft observatory, gentle workshop
 # "Pleasant to read, never straining"
 
 [meta]
 name = "Spy Light"
 version = 1
-author = "anthropic-spy"
+author = "Aspy"
 
 [ui]
 background = "#faf6f0"

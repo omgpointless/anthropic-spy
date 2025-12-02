@@ -5,7 +5,7 @@
 // - Detail panel (optional, toggled with Enter)
 // - Thinking panel (rendered based on preset layout)
 //
-// This is the primary view of anthropic-spy, showing all intercepted
+// This is the primary view of Aspy, showing all intercepted
 // API traffic in real-time.
 
 use crate::events::ProxyEvent;

@@ -1,6 +1,6 @@
 # Development Philosophy
 
-**This document provides AI agents insight into the development philosophy of anthropic-spy, with important distinctions and rules to adhere to**
+**This document provides AI agents insight into the development philosophy of Aspy, with important distinctions and rules to adhere to**
 
 ---
 

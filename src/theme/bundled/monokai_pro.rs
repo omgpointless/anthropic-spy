@@ -1,6 +1,6 @@
 //! Monokai Pro - Modern take on the classic Monokai
 
-pub const THEME: &str = r##"# Monokai Pro theme for anthropic-spy
+pub const THEME: &str = r##"# Monokai Pro theme for Aspy
 # Modern take on the classic Monokai
 
 [meta]

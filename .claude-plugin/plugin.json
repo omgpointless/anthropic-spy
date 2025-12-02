@@ -4,10 +4,10 @@
   "description": "Observability and development tools for Claude Code sessions",
   "author": {
     "name": "aspy contributors",
-    "url": "https://github.com/omgpointless/anthropic-spy"
+    "url": "https://github.com/omgpointless/aspy"
   },
-  "homepage": "https://github.com/omgpointless/anthropic-spy",
-  "repository": "https://github.com/omgpointless/anthropic-spy",
+  "homepage": "https://github.com/omgpointless/aspy",
+  "repository": "https://github.com/omgpointless/aspy",
   "license": "MIT",
   "keywords": ["observability", "proxy", "tui", "statistics", "cost-tracking"],
   "commands": "./commands/",

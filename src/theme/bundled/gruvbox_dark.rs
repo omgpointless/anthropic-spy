@@ -1,6 +1,6 @@
 //! Gruvbox Dark - Retro groove color scheme
 
-pub const THEME: &str = r##"# Gruvbox Dark theme for anthropic-spy
+pub const THEME: &str = r##"# Gruvbox Dark theme for Aspy
 # Retro groove color scheme
 
 [meta]

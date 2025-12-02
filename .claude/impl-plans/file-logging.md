@@ -17,7 +17,7 @@ Errors and system logs disappear — no persistent record for debugging.
 ```toml
 [logging]
 level = "info"
-file = "./logs/anthropic-spy.log"      # All logs
+file = "./logs/aspy.log"               # All logs
 error_file = "./logs/errors.log"       # Errors only
 rotate = "daily"                        # or "size:10mb"
 ```

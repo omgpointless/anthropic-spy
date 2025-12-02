@@ -55,7 +55,7 @@ Of course, users will have full agency and ownership of this database. It's simp
 
 ## A Note on Bugs
 
-Do mind, while generally free of critical bugs, there can be discrepancies or minor issues. Should any of them happen to you, feel free to post an issue on the [GitHub repository](https://github.com/omgpointless/anthropic-spy). Don't worry too much about the formalia of the issue templates should they look daunting.
+Do mind, while generally free of critical bugs, there can be discrepancies or minor issues. Should any of them happen to you, feel free to post an issue on the [GitHub repository](https://github.com/omgpointless/aspy). Don't worry too much about the formalia of the issue templates should they look daunting.
 
 ## What's Next
 

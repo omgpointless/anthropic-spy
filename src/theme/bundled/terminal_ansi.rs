@@ -1,7 +1,7 @@
 //! Terminal ANSI - Uses your terminal's native ANSI colors
 //! Perfect for users who have carefully crafted their terminal theme
 
-pub const THEME: &str = r##"# Terminal ANSI theme for anthropic-spy
+pub const THEME: &str = r##"# Terminal ANSI theme for Aspy
 # Uses your terminal's native ANSI colors - adapts to your terminal theme!
 #
 # This theme uses "ansi:X" syntax instead of hex colors:
@@ -11,12 +11,12 @@ pub const THEME: &str = r##"# Terminal ANSI theme for anthropic-spy
 # - ansi:bg = terminal's default background (transparent)
 #
 # Perfect for users who have carefully crafted their terminal theme and want
-# anthropic-spy to inherit those colors automatically.
+# Aspy to inherit those colors automatically.
 
 [meta]
 name = "Terminal ANSI"
 version = 1
-author = "anthropic-spy"
+author = "Aspy"
 
 [ui]
 background = "ansi:bg"

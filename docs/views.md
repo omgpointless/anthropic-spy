@@ -5,7 +5,7 @@ title: Views
 
 # TUI Views
 
-anthropic-spy's TUI consists of three main views that you can switch between using keyboard shortcuts.
+Aspy's TUI consists of three main views that you can switch between using keyboard shortcuts.
 
 ## View Navigation
 

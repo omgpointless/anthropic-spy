@@ -1,5 +1,5 @@
 #!/bin/bash
-# record-demo.sh - Build and record anthropic-spy demo with VHS
+# record-demo.sh - Build and record Aspy demo with VHS
 #
 # Usage:
 #   ./record-demo.sh                    # Build and record with default theme (Dracula)
@@ -9,7 +9,7 @@
 
 set -e
 
-IMAGE_NAME="anthropic-spy-vhs"
+IMAGE_NAME="aspy-vhs"
 THEME="Dracula"
 BUILD=false
 NO_CACHE=""
@@ -37,7 +37,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo "=== anthropic-spy VHS Demo Recorder ==="
+echo "=== Aspy VHS Demo Recorder ==="
 echo "Theme: $THEME"
 
 # Build if requested or image doesn't exist

@@ -1,6 +1,6 @@
 //! Monokai Pro Ristretto - Warm, coffee-inspired variant
 
-pub const THEME: &str = r##"# Monokai Pro Ristretto theme for anthropic-spy
+pub const THEME: &str = r##"# Monokai Pro Ristretto theme for Aspy
 # Warm, coffee-inspired variant
 
 [meta]

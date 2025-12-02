@@ -37,6 +37,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/omgpointless/anthropic-spy.git"
+    "url": "git+https://github.com/omgpointless/aspy.git"
   }
 }

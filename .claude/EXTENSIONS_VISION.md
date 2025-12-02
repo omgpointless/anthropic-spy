@@ -1,22 +1,22 @@
-# Extensions Vision: anthropic-spy as a Claude Code Reflexivity Layer
+# Extensions Vision: Aspy as a Claude Code Reflexivity Layer
 
 ## Executive Summary
 
-anthropic-spy can evolve from a **passive observer** to an **active participant** in the Claude Code ecosystem. By exposing observability data through standard extension mechanisms (HTTP API, MCP servers, hooks, slash commands), we enable:
+Aspy can evolve from a **passive observer** to an **active participant** in the Claude Code ecosystem. By exposing observability data through standard extension mechanisms (HTTP API, MCP servers, hooks, slash commands), we enable:
 
 1. **Claude self-introspection** - Claude queries its own token usage, tool history, and thinking blocks
 2. **Proactive context management** - Auto-suggest compaction before hitting limits
 3. **In-conversation observability** - Users get instant metrics without leaving the session
 4. **Extensible workflows** - Hook scripts enable custom integrations (budgets, approvals, analytics)
 
-This positions anthropic-spy as the **observability and reflexivity layer** for Claude Code sessions.
+This positions Aspy as the **observability and reflexivity layer** for Claude Code sessions.
 
 ---
 
 ## The Strategic Opportunity
 
 ### Current State
-anthropic-spy intercepts all Claude Code ↔ Anthropic API traffic and provides:
+Aspy intercepts all Claude Code ↔ Anthropic API traffic and provides:
 - Real-time TUI with event streams, thinking blocks, and stats
 - JSON Lines session logs for analysis
 - Token/cost tracking with cache efficiency metrics
@@ -30,7 +30,7 @@ Users cannot:
 - Access metrics without switching to the TUI or parsing logs
 
 ### The Vision
-Expose anthropic-spy's observability data through **Claude Code's native extension points**:
+Expose Aspy's observability data through **Claude Code's native extension points**:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -84,7 +84,7 @@ This vision aligns perfectly with our kernel/userland/user space model:
 
 **Decision Tree:**
 ```
-Is this feature fundamental to anthropic-spy's operation?
+Is this feature fundamental to Aspy's operation?
 ├─ YES → Kernel (HTTP API, event system)
 └─ NO  → Is it an official enhancement?
           ├─ YES → Userland (MCP server, toggleable)
@@ -135,7 +135,7 @@ POST /api/hooks/trigger      → Webhook receiver for external systems
 
 **Purpose:** Enable Claude to introspect its own session
 
-**Package:** `anthropic-spy-mcp` (npm module)
+**Package:** `aspy-mcp` (npm module)
 
 **Tools:**
 ```typescript
@@ -181,9 +181,9 @@ POST /api/hooks/trigger      → Webhook receiver for external systems
 // .mcp.json
 {
   "mcpServers": {
-    "anthropic-spy": {
+    "aspy": {
       "command": "npx",
-      "args": ["anthropic-spy-mcp"],
+      "args": ["aspy-mcp"],
       "env": {
         "ANTHROPIC_SPY_API_URL": "http://127.0.0.1:8080"
       }
@@ -209,9 +209,9 @@ POST /api/hooks/trigger      → Webhook receiver for external systems
 **`.claude/commands/spy/stats.md`**
 ```markdown
 ---
-description: "View anthropic-spy session statistics"
+description: "View Aspy session statistics"
 ---
-Query the anthropic-spy proxy for real-time session metrics.
+Query the Aspy proxy for real-time session metrics.
 
 ```bash
 curl -s http://127.0.0.1:8080/api/stats | jq '{
@@ -473,7 +473,7 @@ async fn maybe_inject_context_warning(&self, request: &Request) -> Option<String
 **Goal:** Claude can introspect its own session
 
 **Implementation:**
-1. Create `anthropic-spy-mcp` npm package
+1. Create `aspy-mcp` npm package
 2. Implement MCP protocol (stdin/stdout JSON-RPC)
 3. Wrap HTTP API calls in MCP tool definitions
 4. Ship with `.mcp.json` example config
@@ -616,8 +616,8 @@ How do we know this vision succeeded?
 - **Hook performance:** PreToolUse hooks add <10ms overhead
 
 ### Strategic Positioning
-- **Referenced in Claude Code docs:** Anthropic mentions anthropic-spy as observability solution
-- **Integration examples:** Other tools query anthropic-spy API (CI/CD, notebooks)
+- **Referenced in Claude Code docs:** Anthropic mentions Aspy as observability solution
+- **Integration examples:** Other tools query Aspy API (CI/CD, notebooks)
 - **Teaching resource:** Used in tutorials for "understanding Claude Code behavior"
 
 ---
@@ -701,7 +701,7 @@ How do we know this vision succeeded?
 
 ## Conclusion
 
-anthropic-spy is positioned to become the **reflexivity layer** for Claude Code—enabling both users and Claude itself to understand, optimize, and extend AI-assisted development sessions.
+Aspy is positioned to become the **reflexivity layer** for Claude Code—enabling both users and Claude itself to understand, optimize, and extend AI-assisted development sessions.
 
 By exposing observability data through standard extension mechanisms, we unlock:
 - **Self-aware AI:** Claude introspects its own behavior

@@ -1,6 +1,6 @@
 //! JetBrains Darcula - The classic IDE dark theme
 
-pub const THEME: &str = r##"# JetBrains Darcula theme for anthropic-spy
+pub const THEME: &str = r##"# JetBrains Darcula theme for Aspy
 # The classic IDE dark theme
 
 [meta]

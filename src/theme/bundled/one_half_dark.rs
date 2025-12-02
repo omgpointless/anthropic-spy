@@ -1,6 +1,6 @@
 //! One Half Dark - A clean, modern dark theme
 
-pub const THEME: &str = r##"# One Half Dark theme for anthropic-spy
+pub const THEME: &str = r##"# One Half Dark theme for Aspy
 # A clean, modern dark theme (default)
 
 [meta]

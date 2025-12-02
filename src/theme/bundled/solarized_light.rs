@@ -1,6 +1,6 @@
 //! Solarized Light - Ethan Schoonover's precision color palette (light variant)
 
-pub const THEME: &str = r##"# Solarized Light theme for anthropic-spy
+pub const THEME: &str = r##"# Solarized Light theme for Aspy
 # Ethan Schoonover's precision color palette (light variant)
 #
 # NOTE: context_bar.fill uses CYAN (#2aa198) instead of the olive green (#859900)

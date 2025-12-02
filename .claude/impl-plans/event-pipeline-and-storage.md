@@ -1763,7 +1763,7 @@ r2d2_sqlite = "0.24"
 4. `/api/lifestats/health` endpoint
 5. **TODO**: Wire up `run_retention_cleanup()` - options:
    - Periodic check in writer thread (e.g., every 24 hours)
-   - CLI command: `anthropic-spy --cleanup`
+   - CLI command: `aspy --cleanup`
    - HTTP endpoint: `POST /api/lifestats/cleanup`
 
 ### Phase 1c: LifestatsProcessor
@@ -1778,11 +1778,66 @@ r2d2_sqlite = "0.24"
 3. Lifetime stats aggregation
 4. HTTP API endpoints
 
-### Phase 3: MCP Tools
-1. `aspy_recall_context` tool
-2. `aspy_lifetime_stats` tool
-3. `aspy_search_thinking` tool
-4. `aspy_session_history` tool
+### Phase 3: MCP Tools & Agent Layer
+1. **MCP Tools** (expose query interface to Claude)
+   - `aspy_recall_context` - Combined thinking + prompt search
+   - `aspy_lifetime_stats` - Aggregated statistics
+   - `aspy_search_thinking` - FTS5 thinking block search
+   - `aspy_search_prompts` - FTS5 user prompt search
+   - `aspy_get_events` - Direct event retrieval by ID (for agent follow-up)
+   - `aspy_session_history` - Session timeline
+
+2. **Claude Code Plugin Agents** (UX orchestration layer)
+
+   **Location:** `.claude-plugin/agents/`
+
+   **Agent: Context Recovery** (`recover.md`)
+   - **Model:** Haiku (fast, cheap search orchestration)
+   - **Role:** Intelligent search coordinator
+   - **Tools:** `aspy_search`, `aspy_recall_context`, `aspy_get_events`
+   - **Workflow:**
+     1. Parse user's fuzzy query into search strategies
+     2. Execute parallel searches with different keywords
+     3. Filter and rank results by relevance
+     4. Return structured matches (session ID + event ranges + previews)
+     5. Main agent (Opus) reads full events for synthesis
+   - **Critical:** NO summarization - retrieval and filtering only
+
+   **Agent: Session Profiler** (`profile.md`)
+   - **Model:** Haiku (numeric analysis)
+   - **Role:** Performance and cost analysis
+   - **Tools:** `aspy_lifetime_stats`, `aspy_session_history`
+   - **Workflow:**
+     1. Query aggregated statistics from SQLite
+     2. Identify patterns (expensive tools, cache inefficiency, etc.)
+     3. Generate actionable insights
+
+   **Agent: Cost Analyzer** (`cost.md`)
+   - **Model:** Haiku (simple calculations)
+   - **Role:** Budget tracking and forecasting
+   - **Tools:** `aspy_lifetime_stats`, `aspy_stats`
+   - **Workflow:**
+     1. Calculate costs from token usage
+     2. Project future costs based on trends
+     3. Identify optimization opportunities
+
+3. **Two-Agent Pattern** (Recovery Workflow)
+   ```
+   User Query → Haiku Agent (search + filter)
+                    ↓ structured results
+                Opus Agent (read full + synthesize)
+   ```
+
+   **Why this works:**
+   - Haiku: Fast parallel searches, cheap even with multiple attempts
+   - Opus: Deep context understanding, but only reads filtered results
+   - Division of labor: find vs. understand
+   - Cost optimization: Haiku tokens << Opus tokens for search
+
+4. **POC Status**
+   - ✅ Recovery agent (`recover.md`) created using existing `aspy_search` tool
+   - ⏳ Profiler/Cost agents deferred until Phase 1-2 complete (need SQLite backend)
+   - ⏳ Enhanced MCP tools (`aspy_get_events`) deferred until storage layer ready
 
 ---
 

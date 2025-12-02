@@ -1,8 +1,8 @@
 ---
-description: "View anthropic-spy session statistics"
+description: "View Aspy session statistics"
 ---
 
-Use the `aspy_stats` MCP tool to get current session statistics from anthropic-spy.
+Use the `aspy_stats` MCP tool to get current session statistics from Aspy.
 
 Display the results in a clear format showing:
 - Session duration and event count
@@ -12,4 +12,4 @@ Display the results in a clear format showing:
 - Top 5 most-used tools
 - Thinking block statistics
 
-**Note:** Requires anthropic-spy proxy to be running (default port 8080).
+**Note:** Requires Aspy proxy to be running (default port 8080).

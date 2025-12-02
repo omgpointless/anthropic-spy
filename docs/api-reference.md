@@ -5,7 +5,7 @@ title: API Reference
 
 # REST API Reference
 
-anthropic-spy exposes a local HTTP API for programmatic access to session data. All endpoints return JSON and are designed for local consumption only.
+Aspy exposes a local HTTP API for programmatic access to session data. All endpoints return JSON and are designed for local consumption only.
 
 **Security:** The API binds to `127.0.0.1` by default (localhost only).
 
@@ -345,7 +345,7 @@ Search session logs for past conversations. Useful for recovering context lost t
   "total_matches": 3,
   "results": [
     {
-      "session": "anthropic-spy-20251127-103000-abc1.jsonl",
+      "session": "aspy-20251127-103000-abc1.jsonl",
       "timestamp": "2025-11-27T10:35:00Z",
       "role": "user",
       "text": "...implement JWT authentication for the API..."

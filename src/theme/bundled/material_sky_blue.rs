@@ -1,6 +1,6 @@
 //! Material Sky Blue - Bright light theme with blue accents
 
-pub const THEME: &str = r##"# Material Sky Blue theme for anthropic-spy
+pub const THEME: &str = r##"# Material Sky Blue theme for Aspy
 # Bright light theme with blue accents
 
 [meta]

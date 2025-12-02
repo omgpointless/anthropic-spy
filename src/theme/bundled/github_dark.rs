@@ -1,6 +1,6 @@
 //! GitHub Dark - GitHub's official dark theme
 
-pub const THEME: &str = r##"# GitHub Dark theme for anthropic-spy
+pub const THEME: &str = r##"# GitHub Dark theme for Aspy
 # GitHub's official dark theme
 
 [meta]

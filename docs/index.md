@@ -8,7 +8,7 @@ title: Home
   <p class="hero-tagline">Stop guessing. Start seeing.</p>
   <p class="hero-subtitle">Real-time observability proxy for Claude Code</p>
   <div class="hero-links">
-    <a href="https://github.com/omgpointless/anthropic-spy" class="primary">Get Started</a>
+    <a href="https://github.com/omgpointless/aspy" class="primary">Get Started</a>
     <a href="{{ '/blog/' | relative_url }}">Read the Blog</a>
   </div>
 </div>

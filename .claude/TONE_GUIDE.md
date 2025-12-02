@@ -1,4 +1,4 @@
-# Tone & Messaging Guide - anthropic-spy
+# Tone & Messaging Guide - Aspy
 
 Quick reference for maintaining consistent voice across all project communications.
 

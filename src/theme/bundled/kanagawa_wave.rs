@@ -1,6 +1,6 @@
 //! Kanagawa Wave - Inspired by Katsushika Hokusai's famous painting
 
-pub const THEME: &str = r##"# Kanagawa Wave theme for anthropic-spy
+pub const THEME: &str = r##"# Kanagawa Wave theme for Aspy
 # Inspired by Katsushika Hokusai's famous painting
 
 [meta]

@@ -84,7 +84,7 @@ If no config file exists, creates one with defaults first.
 aspy config --update
 ```
 
-Merges new defaults into your existing config file while preserving your customizations. Useful after upgrading anthropic-spy to get new configuration options.
+Merges new defaults into your existing config file while preserving your customizations. Useful after upgrading Aspy to get new configuration options.
 
 Shows a colored diff preview before applying:
 - Green lines = additions

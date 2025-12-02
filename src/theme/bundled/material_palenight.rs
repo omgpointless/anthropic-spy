@@ -1,6 +1,6 @@
 //! Material Palenight - Soft purple-tinted dark theme
 
-pub const THEME: &str = r##"# Material Palenight theme for anthropic-spy
+pub const THEME: &str = r##"# Material Palenight theme for Aspy
 # Soft purple-tinted dark theme
 
 [meta]

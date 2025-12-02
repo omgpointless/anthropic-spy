@@ -51,7 +51,7 @@ pub struct TopicInfo {
 ///
 /// # Architecture
 ///
-/// The App struct is the central state container for anthropic-spy's TUI.
+/// The App struct is the central state container for Aspy's TUI.
 /// It's organized into logical groups:
 ///
 /// - **Core Data**: Events received from the proxy, accumulated statistics

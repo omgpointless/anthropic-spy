@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**anthropic-spy** is a Rust TUI (Terminal User Interface) application that acts as an observability proxy between Claude Code and the Anthropic API. It intercepts HTTP traffic, parses tool calls and responses, and displays them in real-time while logging to JSON Lines files.
+**Aspy** is a Rust TUI (Terminal User Interface) application that acts as an observability proxy between Claude Code and the Anthropic API. It intercepts HTTP traffic, parses tool calls and responses, and displays them in real-time while logging to JSON Lines files.
 
 **Key Purpose:** Understand Claude Code's behavior by visualizing all API interactions.
 
@@ -198,7 +198,7 @@ State-based approach (no debouncing): tracks which keys are currently pressed vi
 
 ## Session Log Analysis
 
-Session logs are stored in JSON Lines format (`./logs/anthropic-spy-YYYYMMDD-HHMMSS-XXXX.jsonl`). Use `jq` for analysis.
+Session logs are stored in JSON Lines format (`./logs/aspy-YYYYMMDD-HHMMSS-XXXX.jsonl`). Use `jq` for analysis.
 
 **Quick queries:**
 ```bash

@@ -1,6 +1,6 @@
 // TOML theme format parser
 //
-// This is the native theme format for anthropic-spy. Each theme explicitly
+// This is the native theme format for Aspy. Each theme explicitly
 // defines all semantic colors - no automatic mapping from palette slots.
 //
 // Format version: 1

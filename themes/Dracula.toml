@@ -1,10 +1,10 @@
-# Dracula theme for anthropic-spy
+# Dracula theme for Aspy
 # Popular purple-accented dark theme
 
 [meta]
 name = "Dracula"
 version = 1
-author = "anthropic-spy"
+author = "Aspy"
 
 [ui]
 background = "#282a36"

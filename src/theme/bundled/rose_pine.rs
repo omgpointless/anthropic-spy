@@ -1,6 +1,6 @@
 //! Rosé Pine - All natural pine, faux fur and a bit of soho vibes
 
-pub const THEME: &str = r##"# Rosé Pine theme for anthropic-spy
+pub const THEME: &str = r##"# Rosé Pine theme for Aspy
 # All natural pine, faux fur and a bit of soho vibes
 
 [meta]

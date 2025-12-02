@@ -1,6 +1,6 @@
 //! Material Space - Deep blue space theme
 
-pub const THEME: &str = r##"# Material Space theme for anthropic-spy
+pub const THEME: &str = r##"# Material Space theme for Aspy
 # Deep blue space theme
 
 [meta]

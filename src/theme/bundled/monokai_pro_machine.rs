@@ -1,6 +1,6 @@
 //! Monokai Pro Machine - Industrial, teal-accented variant
 
-pub const THEME: &str = r##"# Monokai Pro Machine theme for anthropic-spy
+pub const THEME: &str = r##"# Monokai Pro Machine theme for Aspy
 # Industrial, teal-accented variant
 
 [meta]

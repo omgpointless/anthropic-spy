@@ -1,6 +1,6 @@
 //! Material Deep Ocean - Ultra-dark blue theme
 
-pub const THEME: &str = r##"# Material Deep Ocean theme for anthropic-spy
+pub const THEME: &str = r##"# Material Deep Ocean theme for Aspy
 # Ultra-dark blue theme
 
 [meta]

@@ -20,7 +20,7 @@ This generates mock events showing thinking blocks, tool calls, and token tracki
 
 **Option A: Download** (recommended)
 
-Get the latest release from [GitHub Releases](https://github.com/omgpointless/anthropic-spy/releases).
+Get the latest release from [GitHub Releases](https://github.com/omgpointless/aspy/releases).
 
 **Option B: Build from source**
 ```bash

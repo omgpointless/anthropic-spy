@@ -1,6 +1,6 @@
-# Anthropic Spy Roadmap
+# Aspy Roadmap
 
-A living document capturing the vision and planned iterations for anthropic-spy.
+A living document capturing the vision and planned iterations for Aspy.
 
 **Philosophy:** Build fundamentals that enable feature iterations. Small batches, frequent releases, no grand slams.
 
@@ -60,11 +60,11 @@ A living document capturing the vision and planned iterations for anthropic-spy.
 
 **Theme:** "Observation + Analysis in Terminal"
 
-Building on 0.1.0, this release demonstrates that anthropic-spy isn't just a proxy - it's an analysis tool.
+Building on 0.1.0, this release demonstrates that Aspy isn't just a proxy - it's an analysis tool.
 
 ### Potential Features
 - Session profile summary (on exit or dedicated view)
-- CLI query mode (`anthropic-spy analyze <session>`)
+- CLI query mode (`aspy analyze <session>`)
 - More chart types (token timeline, tool sequence)
 - Export capabilities (CSV, JSON reports)
 - Context warning augmentation improvements
@@ -79,14 +79,14 @@ Building on 0.1.0, this release demonstrates that anthropic-spy isn't just a pro
 
 ## Horizon: The Suite Vision
 
-Long-term, anthropic-spy evolves from observer to augmenter:
+Long-term, Aspy evolves from observer to augmenter:
 
 ```
 PHASE 1 (Current):  Claude Code ←→ Anthropic API
-                    (spy observes)
+                    (aspy observes)
 
-PHASE 2 (Future):   Claude Code ←→ anthropic-spy ←→ Anthropic API
-                    (spy PARTICIPATES)
+PHASE 2 (Future):   Claude Code ←→ Aspy ←→ Anthropic API
+                    (aspy PARTICIPATES)
 ```
 
 ### Augmentation Ideas (Not Committed)

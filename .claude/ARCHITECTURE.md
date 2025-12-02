@@ -1,12 +1,12 @@
-# anthropic-spy Architecture
+# Aspy Architecture
 
-**Purpose:** This document explains the architectural principles and patterns that make anthropic-spy maintainable, composable, and extensible. For implementation details, see CLAUDE.md. For future extensibility, see EXTENSIONS_VISION.md.
+**Purpose:** This document explains the architectural principles and patterns that make Aspy maintainable, composable, and extensible. For implementation details, see CLAUDE.md. For future extensibility, see EXTENSIONS_VISION.md.
 
 ---
 
 ## Core Principle: Composition Over Inheritance
 
-anthropic-spy uses **Rust's trait system** to compose behaviors instead of building inheritance hierarchies. Components gain capabilities by implementing traits, not by inheriting from base classes.
+Aspy uses **Rust's trait system** to compose behaviors instead of building inheritance hierarchies. Components gain capabilities by implementing traits, not by inheriting from base classes.
 
 **Why this matters:**
 - Features are independent and testable

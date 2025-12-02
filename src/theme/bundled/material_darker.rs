@@ -1,6 +1,6 @@
 //! Material Darker - Deep charcoal dark theme
 
-pub const THEME: &str = r##"# Material Darker theme for anthropic-spy
+pub const THEME: &str = r##"# Material Darker theme for Aspy
 # Deep charcoal dark theme
 
 [meta]

@@ -1,6 +1,6 @@
 //! Catppuccin Latte - Soothing pastel light theme
 
-pub const THEME: &str = r##"# Catppuccin Latte theme for anthropic-spy
+pub const THEME: &str = r##"# Catppuccin Latte theme for Aspy
 # Soothing pastel light theme
 
 [meta]

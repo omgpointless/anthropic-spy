@@ -1,4 +1,4 @@
-# Contributing to Anthropic Spy
+# Contributing to Aspy
 
 Thank you for your interest in contributing! This guide will help you get started.
 
@@ -14,8 +14,8 @@ Thank you for your interest in contributing! This guide will help you get starte
 
 ```bash
 # Clone the repository
-git clone https://github.com/omgpointless/anthropic-spy.git
-cd anthropic-spy
+git clone https://github.com/omgpointless/aspy.git
+cd aspy
 
 # Build and run
 cargo build
@@ -199,8 +199,8 @@ Include:
 
 ## Questions?
 
-- Open a [GitHub Discussion](https://github.com/omgpointless/anthropic-spy/discussions)
-- Check existing [Issues](https://github.com/omgpointless/anthropic-spy/issues)
+- Open a [GitHub Discussion](https://github.com/omgpointless/aspy/discussions)
+- Check existing [Issues](https://github.com/omgpointless/aspy/issues)
 
 ## License
 

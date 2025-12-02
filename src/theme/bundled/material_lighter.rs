@@ -1,6 +1,6 @@
 //! Material Lighter - Clean light theme
 
-pub const THEME: &str = r##"# Material Lighter theme for anthropic-spy
+pub const THEME: &str = r##"# Material Lighter theme for Aspy
 # Clean light theme
 
 [meta]

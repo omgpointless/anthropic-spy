@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * aspy-mcp: MCP server for anthropic-spy
+ * aspy-mcp: MCP server for Aspy
  *
- * Exposes anthropic-spy's HTTP API as MCP tools for Claude Code integration.
- * This is a thin wrapper - all data comes from the running anthropic-spy proxy.
+ * Exposes Aspy's HTTP API as MCP tools for Claude Code integration.
+ * This is a thin wrapper - all data comes from the running Aspy proxy.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -79,7 +79,7 @@ async function fetchApi<T>(endpoint: string): Promise<ApiResult<T>> {
     return {
       ok: false,
       error: {
-        error: `Failed to connect to anthropic-spy: ${message}`,
+        error: `Failed to connect to Aspy: ${message}`,
         status: 0,
       },
     };
@@ -111,7 +111,7 @@ async function postApi<T>(endpoint: string, body: unknown): Promise<ApiResult<T>
     return {
       ok: false,
       error: {
-        error: `Failed to connect to anthropic-spy: ${message}`,
+        error: `Failed to connect to Aspy: ${message}`,
         status: 0,
       },
     };
@@ -211,7 +211,7 @@ server.registerTool(
   {
     title: "Session Statistics",
     description:
-      "Get current session statistics including tokens, costs, tool calls, and thinking blocks from anthropic-spy",
+      "Get current session statistics including tokens, costs, tool calls, and thinking blocks from Aspy",
     inputSchema: {},
     outputSchema: {
       session: z.object({
@@ -295,7 +295,7 @@ server.registerTool(
   {
     title: "Session Events",
     description:
-      "Get recent events from the anthropic-spy session (tool calls, API usage, thinking blocks, etc.)",
+      "Get recent events from the Aspy session (tool calls, API usage, thinking blocks, etc.)",
     inputSchema: {
       limit: z
         .number()
@@ -362,7 +362,7 @@ server.registerTool(
   {
     title: "Context Window Status",
     description:
-      "Get current context window usage, warning level, and compact count from anthropic-spy",
+      "Get current context window usage, warning level, and compact count from Aspy",
     inputSchema: {},
     outputSchema: {
       current_tokens: z.number(),
@@ -437,7 +437,7 @@ server.registerTool(
   {
     title: "Active Sessions",
     description:
-      "List all active Claude Code sessions tracked by anthropic-spy. Shows user IDs, session status, and per-session statistics.",
+      "List all active Claude Code sessions tracked by Aspy. Shows user IDs, session status, and per-session statistics.",
     inputSchema: {},
     outputSchema: {
       active_count: z.number(),
@@ -577,7 +577,7 @@ server.registerTool(
       summaryParts.push("");
       for (const r of data.results) {
         // Extract just the date part from session filename
-        const sessionDate = r.session.replace("anthropic-spy-", "").replace(".jsonl", "").slice(0, 8);
+        const sessionDate = r.session.replace("aspy-", "").replace(".jsonl", "").slice(0, 8);
         summaryParts.push(`**${sessionDate}** [${r.role}]:`);
         summaryParts.push(`${r.text}\n`);
       }

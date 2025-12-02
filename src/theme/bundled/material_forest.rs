@@ -1,6 +1,6 @@
 //! Material Forest - Deep green nature theme
 
-pub const THEME: &str = r##"# Material Forest theme for anthropic-spy
+pub const THEME: &str = r##"# Material Forest theme for Aspy
 # Deep green nature theme
 
 [meta]

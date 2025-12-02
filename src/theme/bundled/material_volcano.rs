@@ -1,6 +1,6 @@
 //! Material Volcano - Deep red dark theme
 
-pub const THEME: &str = r##"# Material Volcano theme for anthropic-spy
+pub const THEME: &str = r##"# Material Volcano theme for Aspy
 # Deep red dark theme
 
 [meta]

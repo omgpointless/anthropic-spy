@@ -1,6 +1,6 @@
 # .claude/ Directory Structure
 
-This directory contains project documentation, reference materials, and Claude Code configuration for the anthropic-spy project.
+This directory contains project documentation, reference materials, and Claude Code configuration for the Aspy project.
 
 ## Purpose
 
@@ -30,7 +30,7 @@ The following have been superseded by documentation in `docs/`:
 - `.claude-plugin/` - Optional development tooling (committed)
   - Provides `/aspy:stats` and `/aspy:tempcontext` slash commands
   - Automatic `cargo fmt` hooks for Rust files
-  - Install with: `/plugin marketplace add /path/to/anthropic-spy`
+  - Install with: `/plugin marketplace add /path/to/aspy`
 
 ### Meta
 - `README.md` - This file
