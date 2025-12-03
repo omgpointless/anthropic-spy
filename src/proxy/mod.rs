@@ -12,6 +12,7 @@ pub mod api;
 pub mod augmentation;
 pub mod sessions;
 pub mod sse;
+pub mod translation;
 
 use crate::config::{ClientsConfig, Config};
 use crate::events::{generate_id, ProxyEvent};
@@ -21,6 +22,7 @@ use crate::pipeline::{EventPipeline, ProcessContext};
 use crate::{SharedContextState, StreamingThinking};
 use anyhow::{Context, Result};
 use augmentation::{AugmentationContext, AugmentationPipeline, StopReason};
+use translation::{ApiFormat, TranslationPipeline};
 use axum::{
     body::Body,
     extract::State,
@@ -113,6 +115,8 @@ pub struct ProxyState {
     pipeline: Option<Arc<EventPipeline>>,
     /// Query interface for lifestats database (optional, requires lifestats enabled)
     pub lifestats_query: Option<Arc<crate::pipeline::lifestats_query::LifestatsQuery>>,
+    /// Translation pipeline for OpenAI ↔ Anthropic format conversion
+    translation: Arc<TranslationPipeline>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -164,6 +168,8 @@ struct ResponseContext {
     state: ProxyState,
     /// User ID (api_key_hash) for session tracking
     user_id: Option<String>,
+    /// Translation context for response translation (if format differs)
+    translation_ctx: translation::TranslationContext,
 }
 
 /// Start the proxy server
@@ -192,6 +198,14 @@ pub async fn start_proxy(
             "Augmentation pipeline initialized with: {:?}",
             augmentation.augmenter_names()
         );
+    }
+
+    // Create translation pipeline from config (opt-in feature)
+    let translation = Arc::new(TranslationPipeline::from_config(&config.translation));
+    if translation.is_enabled() {
+        tracing::info!("Translation pipeline enabled (OpenAI ↔ Anthropic)");
+    } else {
+        tracing::debug!("Translation pipeline: disabled");
     }
 
     // Log client routing config if present
@@ -227,6 +241,7 @@ pub async fn start_proxy(
         clients: config.clients.clone(),
         pipeline: shared.pipeline,
         lifestats_query: shared.lifestats_query,
+        translation,
     };
 
     // Build the router - API endpoints + proxy handler
@@ -465,7 +480,9 @@ async fn proxy_handler(
         .clone()
         .or_else(|| extract_user_id(&headers));
 
-    let is_messages_endpoint = routing.api_path.contains("/messages");
+    // Check original path to detect if this is a messages-like endpoint
+    // (for session backfill, which happens before translation)
+    let _original_is_messages = routing.api_path.contains("/messages");
 
     // Backfill session user_id immediately (before any events are sent)
     // This ensures events go to the hook-created session, not a new implicit one
@@ -488,8 +505,30 @@ async fn proxy_handler(
         .await
         .map_err(|e| ProxyError::BodyRead(format!("Failed to read request body: {}", e)))?;
 
-    // Try to parse request body as JSON for display
-    let request_body = if is_messages_endpoint {
+    // Apply translation if enabled and request is in a different format
+    let (translated_body, translation_ctx, translated_path) = state
+        .translation
+        .translate_request(&routing.api_path, &headers, &body_bytes)
+        .map_err(|e| ProxyError::BodyRead(format!("Translation failed: {}", e)))?;
+
+    // Use translated path for endpoint detection (may have changed from /chat/completions to /messages)
+    let effective_api_path = if translation_ctx.needs_response_translation() {
+        tracing::debug!(
+            "Request translated: {} -> {} (path: {} -> {})",
+            translation_ctx.client_format,
+            translation_ctx.backend_format,
+            routing.api_path,
+            translated_path
+        );
+        translated_path.clone()
+    } else {
+        routing.api_path.clone()
+    };
+
+    let is_messages_endpoint = effective_api_path.contains("/messages");
+
+    // Try to parse request body as JSON for display (use original body for logging)
+    let request_body = if is_messages_endpoint || routing.api_path.contains("/chat/completions") {
         serde_json::from_slice::<serde_json::Value>(&body_bytes).ok()
     } else {
         None
@@ -541,8 +580,8 @@ async fn proxy_handler(
         }
     }
 
-    // Build the forward URL using client routing
-    let forward_url = format!("{}{}", routing.base_url, routing.api_path);
+    // Build the forward URL using client routing and translated path
+    let forward_url = format!("{}{}", routing.base_url, effective_api_path);
     let query = uri.query().unwrap_or("");
     let forward_url = if query.is_empty() {
         forward_url
@@ -550,10 +589,8 @@ async fn proxy_handler(
         format!("{}?{}", forward_url, query)
     };
 
-    // INTERCEPTOR: Request-side injection disabled - using SSE response injection instead
-    // SSE injection is more reliable (no prompt engineering) and appears at end of response
-    // See handle_streaming_response() for the active injection point
-    let final_body = body_bytes.to_vec();
+    // Use translated body if translation occurred, otherwise use original
+    let final_body = translated_body;
 
     // Build the forwarded request
     // With reqwest 0.12, Method types align with axum (both use http 1.0 crate)
@@ -627,6 +664,7 @@ async fn proxy_handler(
         is_messages_endpoint,
         state,
         user_id,
+        translation_ctx,
     };
 
     // Decide: streaming (SSE) or buffered (JSON) response handling
@@ -651,7 +689,12 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
         is_messages_endpoint,
         state,
         user_id,
+        translation_ctx,
     } = ctx;
+
+    // Check if we need to translate responses back to client format
+    // Note: Streaming response translation is not yet implemented - buffered works
+    let _needs_translation = translation_ctx.needs_response_translation();
     // Create channel for streaming to client
     // Buffer size of 64 provides some cushion without excessive memory use
     let (tx, rx) = mpsc::channel::<Result<Bytes, Infallible>>(64);
@@ -920,6 +963,7 @@ async fn handle_buffered_response(ctx: ResponseContext) -> Result<Response<Body>
         is_messages_endpoint,
         state,
         user_id,
+        translation_ctx,
     } = ctx;
     // Read full response body
     let response_body = response
@@ -995,18 +1039,57 @@ async fn handle_buffered_response(ctx: ResponseContext) -> Result<Response<Body>
         }
     }
 
-    // Build response to return to Claude Code
+    // Apply response translation if needed (convert Anthropic response to OpenAI format)
+    let final_response_body = if translation_ctx.needs_response_translation() && status.is_success() {
+        // Get response translator
+        if let Some(translator) = state.translation.get_response_translator(
+            ApiFormat::Anthropic,
+            translation_ctx.client_format,
+        ) {
+            match translator.translate_buffered(&response_body, &translation_ctx) {
+                Ok(translated) => {
+                    tracing::debug!(
+                        "Response translated: {} -> {} ({} -> {} bytes)",
+                        ApiFormat::Anthropic,
+                        translation_ctx.client_format,
+                        response_body.len(),
+                        translated.len()
+                    );
+                    translated.into()
+                }
+                Err(e) => {
+                    tracing::warn!("Response translation failed, returning original: {}", e);
+                    response_body
+                }
+            }
+        } else {
+            response_body
+        }
+    } else {
+        response_body
+    };
+
+    // Build response to return to client
     let mut builder = Response::builder().status(status.as_u16());
 
     for (key, value) in response_headers.iter() {
         if key == "transfer-encoding" || key == "connection" {
             continue;
         }
+        // Update content-length if translation occurred
+        if key == "content-length" && translation_ctx.needs_response_translation() {
+            continue; // Will be set automatically from body
+        }
         builder = builder.header(key, value);
     }
 
+    // Update content-type for translated responses
+    if translation_ctx.needs_response_translation() {
+        builder = builder.header("content-type", "application/json");
+    }
+
     builder
-        .body(Body::from(response_body))
+        .body(Body::from(final_response_body))
         .map_err(|e| ProxyError::ResponseBuild(e.to_string()))
 }
 
