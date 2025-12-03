@@ -279,7 +279,10 @@ impl LifestatsProcessor {
                     // Periodic retention cleanup (every 24 hours)
                     if last_cleanup.elapsed() >= CLEANUP_INTERVAL {
                         if config.retention_days > 0 {
-                            tracing::debug!("Starting retention cleanup ({}d retention)", config.retention_days);
+                            tracing::debug!(
+                                "Starting retention cleanup ({}d retention)",
+                                config.retention_days
+                            );
                             match Self::run_retention_cleanup(&conn, config.retention_days) {
                                 Ok(deleted) => {
                                     tracing::info!(
@@ -332,10 +335,12 @@ impl LifestatsProcessor {
             if let Err(e) = Self::store_event(conn, &event, &ctx, config) {
                 // Log but don't fail the batch (best-effort storage)
                 failed_count += 1;
-                tracing::warn!("Failed to store event (type={:?}, session_id={:?}): {}",
+                tracing::warn!(
+                    "Failed to store event (type={:?}, session_id={:?}): {}",
                     std::mem::discriminant(&event),
                     ctx.session_id.as_deref(),
-                    e);
+                    e
+                );
             }
         }
 
@@ -641,7 +646,10 @@ impl LifestatsProcessor {
             "#,
             params![cutoff_str],
         )? as i64;
-        tracing::debug!("Deleted {} entries from responses_fts", responses_fts_deleted);
+        tracing::debug!(
+            "Deleted {} entries from responses_fts",
+            responses_fts_deleted
+        );
 
         // 4. Now delete from base tables (order matters for FK relationships)
         deleted += conn.execute(

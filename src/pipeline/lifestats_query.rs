@@ -203,6 +203,7 @@ pub struct LifetimeStats {
     pub total_cost_usd: f64,
     pub total_tool_calls: i64,
     pub total_thinking_blocks: i64,
+    pub total_prompts: i64,
     pub first_session: Option<String>,
     pub last_session: Option<String>,
     pub by_model: Vec<ModelStats>,
@@ -486,7 +487,11 @@ impl LifestatsQuery {
         }
 
         // Sort by rank (lower = more relevant)
-        results.sort_by(|a, b| a.rank.partial_cmp(&b.rank).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            a.rank
+                .partial_cmp(&b.rank)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Limit total results
         results.truncate(limit);
@@ -716,7 +721,11 @@ impl LifestatsQuery {
         }
 
         // Sort by rank (lower = more relevant)
-        results.sort_by(|a, b| a.rank.partial_cmp(&b.rank).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            a.rank
+                .partial_cmp(&b.rank)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Limit total results
         results.truncate(limit);
@@ -783,6 +792,17 @@ impl LifestatsQuery {
             SELECT COUNT(*)
             FROM thinking_blocks t
             JOIN sessions s ON t.session_id = s.id
+            WHERE s.user_id = ?1
+            "#,
+            params![user_id],
+            |row| row.get(0),
+        )?;
+
+        let total_prompts: i64 = conn.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM user_prompts p
+            JOIN sessions s ON p.session_id = s.id
             WHERE s.user_id = ?1
             "#,
             params![user_id],
@@ -856,6 +876,7 @@ impl LifestatsQuery {
             total_cost_usd: total_cost,
             total_tool_calls,
             total_thinking_blocks: total_thinking,
+            total_prompts,
             first_session,
             last_session,
             by_model,
@@ -900,17 +921,14 @@ impl LifestatsQuery {
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
 
-        let total_tool_calls: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM tool_calls",
-            [],
-            |row| row.get(0),
-        )?;
+        let total_tool_calls: i64 =
+            conn.query_row("SELECT COUNT(*) FROM tool_calls", [], |row| row.get(0))?;
 
-        let total_thinking: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM thinking_blocks",
-            [],
-            |row| row.get(0),
-        )?;
+        let total_thinking: i64 =
+            conn.query_row("SELECT COUNT(*) FROM thinking_blocks", [], |row| row.get(0))?;
+
+        let total_prompts: i64 =
+            conn.query_row("SELECT COUNT(*) FROM user_prompts", [], |row| row.get(0))?;
 
         // By model
         let mut by_model = Vec::new();
@@ -975,6 +993,7 @@ impl LifestatsQuery {
             total_cost_usd: total_cost,
             total_tool_calls,
             total_thinking_blocks: total_thinking,
+            total_prompts,
             first_session,
             last_session,
             by_model,

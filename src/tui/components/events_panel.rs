@@ -27,6 +27,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem},
     Frame,
 };
+use unicode_width::UnicodeWidthStr;
 
 /// Events panel component
 ///
@@ -131,17 +132,25 @@ impl EventsPanel {
                 let mut line = format_event_line(event);
 
                 // Truncate with ellipsis if line exceeds available width
-                // Use unicode ellipsis (…) to signal "press Enter for details"
-                if line.len() > content_width {
-                    // Account for emoji width (can be 2 columns) - conservative estimate
-                    let truncate_at = content_width.saturating_sub(2);
-                    // Find the last valid char boundary at or before truncate_at
-                    // This prevents panic from truncating mid-character (e.g., in emojis)
-                    let safe_truncate = (0..=truncate_at.min(line.len()))
-                        .rev()
-                        .find(|&i| line.is_char_boundary(i))
-                        .unwrap_or(0);
-                    line.truncate(safe_truncate);
+                // Use unicode display width (not byte length) for accurate column calculation
+                let display_width = line.width();
+                if display_width > content_width {
+                    // Target width leaves room for ellipsis (1 column)
+                    let target_width = content_width.saturating_sub(1);
+
+                    // Find truncation point by accumulating display widths
+                    let mut current_width = 0;
+                    let mut truncate_at = 0;
+                    for (i, c) in line.char_indices() {
+                        let char_width = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+                        if current_width + char_width > target_width {
+                            break;
+                        }
+                        current_width += char_width;
+                        truncate_at = i + c.len_utf8();
+                    }
+
+                    line.truncate(truncate_at);
                     line.push('…');
                 }
 

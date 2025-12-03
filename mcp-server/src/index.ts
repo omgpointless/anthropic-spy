@@ -294,6 +294,7 @@ interface LifetimeStats {
   total_cost_usd: number;
   total_tool_calls: number;
   total_thinking_blocks: number;
+  total_prompts: number;
   first_session: string | null;
   last_session: string | null;
   by_model: ModelStats[];
@@ -1119,6 +1120,7 @@ server.registerTool(
       total_cost_usd: z.number(),
       total_tool_calls: z.number(),
       total_thinking_blocks: z.number(),
+      total_prompts: z.number(),
       first_session: z.string().nullable(),
       last_session: z.string().nullable(),
       by_model: z.array(

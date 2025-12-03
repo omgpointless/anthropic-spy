@@ -1072,7 +1072,9 @@ fn truncate_around_match(text: &str, keyword: &str, max_len: usize) -> String {
 // Lifestats Endpoints
 // ═════════════════════════════════════════════════════════════════════════════
 
-use crate::pipeline::lifestats_query::{SearchMode, ThinkingMatch, PromptMatch, ResponseMatch, ContextMatch, LifetimeStats};
+use crate::pipeline::lifestats_query::{
+    ContextMatch, LifetimeStats, PromptMatch, ResponseMatch, SearchMode, ThinkingMatch,
+};
 
 /// Response for lifestats health endpoint
 #[derive(Debug, Serialize)]

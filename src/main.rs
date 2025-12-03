@@ -165,10 +165,7 @@ async fn main() -> Result<()> {
     // In headless mode: output logs to stdout
     //
     // Precedence: RUST_LOG env var > config file > default "info"
-    let default_filter = format!(
-        "aspy={},tower_http=debug,axum=debug",
-        config.logging.level
-    );
+    let default_filter = format!("aspy={},tower_http=debug,axum=debug", config.logging.level);
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| default_filter.into());
 
@@ -266,7 +263,9 @@ async fn main() -> Result<()> {
     } else {
         // Initialize event processing pipeline and query interface
         let (pipeline, lifestats_query) = if config.lifestats.enabled {
-            use pipeline::{lifestats::LifestatsProcessor, lifestats_query::LifestatsQuery, EventPipeline};
+            use pipeline::{
+                lifestats::LifestatsProcessor, lifestats_query::LifestatsQuery, EventPipeline,
+            };
 
             let mut pipeline = EventPipeline::new();
 
@@ -295,10 +294,16 @@ async fn main() -> Result<()> {
                                 "Lifestats initialized (SQLite: {})",
                                 config.lifestats.db_path.display()
                             );
-                            (Some(std::sync::Arc::new(pipeline)), Some(std::sync::Arc::new(query)))
+                            (
+                                Some(std::sync::Arc::new(pipeline)),
+                                Some(std::sync::Arc::new(query)),
+                            )
                         }
                         Err(e) => {
-                            tracing::error!("Failed to initialize lifestats query interface: {}", e);
+                            tracing::error!(
+                                "Failed to initialize lifestats query interface: {}",
+                                e
+                            );
                             (Some(std::sync::Arc::new(pipeline)), None)
                         }
                     }

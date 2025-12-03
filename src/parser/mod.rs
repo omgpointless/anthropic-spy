@@ -425,14 +425,9 @@ impl Parser {
                                         content.push_str(thinking);
                                     }
                                 }
-                                (
-                                    PartialContentBlock::Text { content, .. },
-                                    "text_delta",
-                                ) => {
+                                (PartialContentBlock::Text { content, .. }, "text_delta") => {
                                     // Accumulate assistant response text
-                                    if let Some(text) =
-                                        delta.get("text").and_then(|v| v.as_str())
-                                    {
+                                    if let Some(text) = delta.get("text").and_then(|v| v.as_str()) {
                                         content.push_str(text);
                                     }
                                 }
@@ -486,10 +481,8 @@ impl Parser {
                             }
                             PartialContentBlock::Text { content, timestamp } => {
                                 if !content.is_empty() {
-                                    events.push(ProxyEvent::AssistantResponse {
-                                        timestamp,
-                                        content,
-                                    });
+                                    events
+                                        .push(ProxyEvent::AssistantResponse { timestamp, content });
                                 }
                             }
                             PartialContentBlock::Other => {}
@@ -547,10 +540,7 @@ impl Parser {
                 }
                 PartialContentBlock::Text { content, timestamp } => {
                     if !content.is_empty() {
-                        events.push(ProxyEvent::AssistantResponse {
-                            timestamp,
-                            content,
-                        });
+                        events.push(ProxyEvent::AssistantResponse { timestamp, content });
                     }
                 }
                 PartialContentBlock::Other => {}

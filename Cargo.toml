@@ -56,6 +56,9 @@ clap = { version = "4", features = ["derive"] }                 # Command-line a
 # Markdown parsing for thinking panel
 pulldown-cmark = "0.10"                                         # Streaming markdown parser
 
+# Unicode display width calculation for TUI truncation
+unicode-width = "0.2"                                           # Correct width for emojis and CJK
+
 # Clipboard access
 arboard = "3"                                                   # Cross-platform clipboard (Windows/macOS/Linux)
 
