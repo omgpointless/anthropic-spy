@@ -688,8 +688,30 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
         translation_ctx,
     } = ctx;
 
-    // Check if we need to translate responses back to client format
-    // Note: Streaming response translation is not yet implemented - buffered works
+    // ─────────────────────────────────────────────────────────────────────────
+    // STREAMING RESPONSE TRANSLATION - NOT YET INTEGRATED
+    // ─────────────────────────────────────────────────────────────────────────
+    //
+    // The streaming translation infrastructure is fully implemented in
+    // `translation/openai/response.rs` (see `translate_chunk()`, `translate_sse_data()`,
+    // and `finalize()`), but integration here is pending.
+    //
+    // To integrate streaming translation:
+    // 1. If `_needs_translation` is true, wrap the chunk processing below
+    // 2. For each chunk, call `translator.translate_chunk(chunk, &mut translation_ctx)`
+    // 3. Forward translated bytes (non-empty results) to client via `tx`
+    // 4. After stream ends, call `translator.finalize(&translation_ctx)` and send result
+    // 5. The translator handles SSE event boundary detection via `line_buffer`
+    //
+    // Challenges for integration:
+    // - Need mutable `TranslationContext` across async chunk boundaries
+    // - Error handling for mid-stream translation failures
+    // - Coordinating with existing augmentation pipeline
+    //
+    // For now, streaming requests from OpenAI-format clients will receive
+    // Anthropic-format SSE (may work if client is lenient, otherwise fails).
+    // Buffered responses (stream: false) are fully translated.
+    // ─────────────────────────────────────────────────────────────────────────
     let _needs_translation = translation_ctx.needs_response_translation();
     // Create channel for streaming to client
     // Buffer size of 64 provides some cushion without excessive memory use

@@ -3,6 +3,21 @@
 //! The `TranslationContext` is created during request translation and passed
 //! through to response translation. It contains metadata needed to correctly
 //! convert responses back to the client's expected format.
+//!
+//! # Implementation Status
+//!
+//! This context supports both buffered and streaming response translation:
+//!
+//! - **Buffered (Integrated)**: Fields like `client_format`, `backend_format`,
+//!   `original_model`, and `model_mapping` are used by `translate_buffered()`.
+//!
+//! - **Streaming (Infrastructure Ready)**: Fields like `line_buffer`, `chunk_index`,
+//!   `completion_id`, and `finish_reason` are used by `translate_chunk()` in
+//!   `openai/response.rs`. These are fully implemented but not yet called from
+//!   `handle_streaming_response()` in `proxy/mod.rs`.
+//!
+//! The streaming fields are marked with `#[allow(dead_code)]` until proxy
+//! integration is complete.
 
 use super::ApiFormat;
 use std::collections::HashMap;
@@ -104,50 +119,99 @@ impl ModelMapping {
 /// to the client's expected format. It's created during request translation
 /// and passed through the proxy to response translation.
 ///
-/// Note: Some fields are used only by streaming translation which is not yet integrated.
+/// # Field Categories
+///
+/// ## Core Fields (Used by Buffered Translation - Integrated)
+/// - `client_format`, `backend_format`: Determine if/how translation occurs
+/// - `model_mapping`: Bidirectional model name conversion
+/// - `original_model`: Preserves client's model name for response
+/// - `streaming`: Indicates if client requested SSE streaming
+///
+/// ## Streaming State Fields (Used by Streaming Translation - Not Yet Integrated)
+/// These fields are fully implemented and used by `translate_chunk()` in
+/// `openai/response.rs`, but the integration into `handle_streaming_response()`
+/// is pending. They track mutable state across SSE chunks:
+///
+/// - `line_buffer`: Handles SSE events split across TCP chunks
+/// - `completion_id`: OpenAI's `chatcmpl-xxx` ID (generated once per request)
+/// - `chunk_index`: Tracks content block index for tool calls
+/// - `accumulated_content`: For potential usage calculation
+/// - `sent_initial`: Ensures role is sent only in first chunk
+/// - `finish_reason`: Captured from `message_delta` for final chunk
+/// - `response_model`: Model name from Anthropic response (for mapping back)
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct TranslationContext {
-    /// Original format the client spoke
+    // ─────────────────────────────────────────────────────────────────────────
+    // Core fields (used by buffered translation - INTEGRATED)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Original format the client spoke (e.g., OpenAI)
     pub client_format: ApiFormat,
 
     /// Format used with the backend (typically Anthropic)
     pub backend_format: ApiFormat,
 
-    /// Model mapping for name translation
+    /// Model mapping for bidirectional name translation
     pub model_mapping: Arc<ModelMapping>,
 
-    /// Original model name from client request (for response mapping)
+    /// Original model name from client request (preserved for response mapping)
     pub original_model: Option<String>,
 
-    /// Whether the client requested streaming
+    /// Whether the client requested streaming (stream: true in request)
     pub streaming: bool,
 
-    /// Unique request ID (for correlation)
+    /// Unique request ID for correlation (optional, for logging)
     pub request_id: Option<String>,
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Streaming state (mutable during response translation)
+    // Streaming state fields (used by translate_chunk() - NOT YET INTEGRATED)
+    //
+    // These fields support the streaming translation logic in openai/response.rs.
+    // The implementation is complete, but handle_streaming_response() in
+    // proxy/mod.rs does not yet call translate_chunk(). Until then, these
+    // fields are unused at runtime (hence #[allow(dead_code)] on the struct).
     // ─────────────────────────────────────────────────────────────────────────
-    /// Buffer for incomplete SSE lines across chunks
+
+    /// Buffer for incomplete SSE lines that span chunk boundaries
+    ///
+    /// SSE events may be split across TCP chunks. This buffer accumulates
+    /// partial lines until a complete `data: {...}\n\n` is received.
     pub line_buffer: String,
 
-    /// Generated completion ID for OpenAI format
+    /// Generated completion ID for OpenAI format (e.g., "chatcmpl-abc123")
+    ///
+    /// Created once per request and reused across all streaming chunks.
+    /// OpenAI clients expect the same ID throughout the stream.
     pub completion_id: String,
 
-    /// Current chunk index (for OpenAI streaming)
+    /// Current content block index for tool call streaming
+    ///
+    /// OpenAI's streaming format requires an `index` field for tool calls.
+    /// This increments when Anthropic sends `content_block_stop` events.
     pub chunk_index: u32,
 
-    /// Accumulated content for usage calculation
+    /// Accumulated content for potential usage calculation
+    ///
+    /// Some OpenAI clients expect usage stats even in streaming mode.
+    /// Content is accumulated here for token counting if needed.
     pub accumulated_content: String,
 
-    /// Whether we've sent the initial response
+    /// Whether the initial chunk with role has been sent
+    ///
+    /// OpenAI streaming sends `{"role": "assistant"}` only in the first chunk.
+    /// This flag ensures we don't repeat it.
     pub sent_initial: bool,
 
-    /// Tracked finish reason from Anthropic
+    /// Finish reason captured from Anthropic's `message_delta` event
+    ///
+    /// Anthropic sends `stop_reason` in `message_delta`, which maps to
+    /// OpenAI's `finish_reason` (e.g., "end_turn" → "stop").
     pub finish_reason: Option<String>,
 
-    /// Model name from response (may differ from request)
+    /// Model name from Anthropic response (may differ from request)
+    ///
+    /// Used for reverse mapping if `original_model` wasn't captured.
     pub response_model: Option<String>,
 }
 
