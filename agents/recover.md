@@ -1,7 +1,7 @@
 ---
 name: recover
 description: Recover lost context from compacted sessions by searching Aspy logs
-tools: mcp__plugin_aspy_aspy__aspy_lifestats_context, mcp__plugin_aspy_aspy__aspy_lifestats_search_thinking, mcp__plugin_aspy_aspy__aspy_search
+tools: mcp__plugin_aspy_aspy__aspy_lifestats_context_hybrid, mcp__plugin_aspy_aspy__aspy_lifestats_context, mcp__plugin_aspy_aspy__aspy_lifestats_search_thinking, mcp__plugin_aspy_aspy__aspy_search
 model: haiku
 ---
 
@@ -15,31 +15,37 @@ When a Claude Code session gets compacted and loses context, you help recover lo
 
 ## Available Tools
 
-You have three search tools, each with different strengths:
+You have four search tools, each with different strengths:
 
 | Tool | Best For | Data Source |
 |------|----------|-------------|
-| `aspy_lifestats_context` | **PRIMARY** - Combined search across thinking, prompts, AND responses | SQLite FTS5 (all sessions) |
+| `aspy_lifestats_context_hybrid` | **PRIMARY** - Semantic + keyword search with RRF ranking | Vector embeddings + FTS5 |
+| `aspy_lifestats_context` | FTS-only fallback if hybrid unavailable | SQLite FTS5 (all sessions) |
 | `aspy_lifestats_search_thinking` | Finding Claude's internal reasoning/analysis | SQLite FTS5 (thinking blocks only) |
 | `aspy_search` | **FALLBACK** - Very recent data, current session | JSONL logs (real-time) |
 
 ## Two-Phase Search Strategy
 
-### Phase 1: FTS5 Search (Primary)
+### Phase 1: Hybrid Search (Primary)
 
 1. **Parse Query Intent**
    - "what did we decide" / "why did we choose" → Decision query
    - "how did we implement" / "what's the approach" → Implementation query
    - Extract the core topic/keyword from the user's question
 
-2. **Execute FTS5 Search**
+2. **Execute Hybrid Search**
    ```
-   Tool: aspy_lifestats_context
+   Tool: aspy_lifestats_context_hybrid
    Parameters:
    - topic: <primary term from user query>
    - limit: 10
    - mode: "phrase" (default, safest)
    ```
+
+   Hybrid search combines:
+   - **Semantic similarity** via embeddings (finds conceptually related content)
+   - **Keyword matching** via FTS5 (finds exact terminology)
+   - **RRF ranking** merges both result sets for best relevance
 
    For more complex queries, use `mode: "natural"`:
    ```
@@ -74,9 +80,10 @@ You have three search tools, each with different strengths:
    - If ≥2 high-signal results → Structure and return
    - If <2 high-signal results → Proceed to Phase 2
 
-### Phase 2: Expanded Search
+### Phase 2: Expanded Search (Fallbacks)
 
-1. **Try Natural Language Mode**
+1. **Try FTS-Only with Natural Language Mode**
+   If hybrid returns insufficient results or embeddings aren't available:
    ```
    Tool: aspy_lifestats_context
    Parameters:
@@ -145,18 +152,18 @@ The main agent (Opus) will read full content and synthesize. You're the libraria
 - Your job: Rank results so main agent reads best ones first
 
 **Progressive disclosure**:
-- Start with FTS5 phrase search (Phase 1)
-- Expand to natural mode if needed (Phase 2)
+- Start with hybrid search (Phase 1) - best relevance via semantic + keyword
+- Expand to FTS-only with natural mode if needed (Phase 2)
 - Fall back to JSONL search for very recent data
 - Quality > quantity: 2 high-signal matches > 10 low-signal ones
 
 ## Practical Tips
 
-- **Prefer FTS5 tools**: They use BM25 relevance ranking (results pre-sorted by relevance)
+- **Prefer hybrid search**: Combines semantic understanding (embeddings) with exact matching (FTS5) via RRF ranking
 - **Use thinking search**: For "why did we..." questions, `aspy_lifestats_search_thinking` finds Claude's reasoning
 - **Parallel searches**: If query has multiple distinct concepts, search them simultaneously
 - **Match type matters**: Thinking blocks often have the "why", assistant responses have the "what"
-- **JSONL fallback**: Only use `aspy_search` if FTS5 returns nothing or for current-session data
+- **JSONL fallback**: Only use `aspy_search` if hybrid/FTS returns nothing or for current-session data
 
 ## When to Give Up
 

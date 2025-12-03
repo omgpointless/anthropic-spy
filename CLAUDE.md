@@ -8,6 +8,20 @@ Guidance for Claude Code working in this repository.
 
 **Tech:** Rust 2021, Tokio async, Axum (HTTP), Ratatui (TUI), anyhow/thiserror (errors).
 
+## IMPORTANT Constraints from User
+
+The steps below are hard constraints in your assistance of the User.
+
+- ALWAYS execute `cargo check` over `cargo build`
+- ALWAYS execute `cargo fmt` after completion of an implementation.
+- ALWAYS execute `cargo clippy` and resolve all warnings. 
+  - Exception: `dead_code` warnings for future features → add a detailed doc comment explaining the future purpose, then suppress with `#[allow(dead_code)]`
+- ALWAYS check for existing patterns in codebase before introducing new ones
+- ALWAYS validate that there are 0 warnings from `clippy` BEFORE giving summary of your work to the User.
+- NEVER commit changes without user approval
+- NEVER start OR stop the application for the user
+- NEVER apply Claude attribution to commits, user likes CLEAN history.
+
 ## The Mental Model
 
 Inspired by Linux's kernel/userland separation — adapted for our domain:

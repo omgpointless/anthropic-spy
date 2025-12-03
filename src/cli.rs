@@ -125,7 +125,9 @@ pub fn handle_cli() -> bool {
                 println!("  provider = \"local\"  # Options: none, local, openai");
                 println!("  model = \"all-MiniLM-L6-v2\"");
                 println!();
-                println!("Note: Local embeddings require building with --features local-embeddings");
+                println!(
+                    "Note: Local embeddings require building with --features local-embeddings"
+                );
             }
             true
         }
@@ -578,7 +580,10 @@ struct LiveIndexerStatus {
 
 /// Try to get live status from running proxy API
 fn try_api_embeddings_status(config: &Config) -> Option<LiveIndexerStatus> {
-    let url = format!("http://{}/api/lifestats/embeddings/status", config.bind_addr);
+    let url = format!(
+        "http://{}/api/lifestats/embeddings/status",
+        config.bind_addr
+    );
 
     // Use blocking client with short timeout
     let client = reqwest::blocking::Client::builder()
@@ -599,8 +604,18 @@ fn print_embeddings_status_live(status: &LiveIndexerStatus) {
     println!("Embeddings Status (Live)");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!();
-    println!("  Indexer:    {} (connected to running proxy)", if status.running { "RUNNING" } else { "IDLE" });
-    println!("  Provider:   {}", if !status.enabled { "disabled".to_string() } else { status.provider.clone() });
+    println!(
+        "  Indexer:    {} (connected to running proxy)",
+        if status.running { "RUNNING" } else { "IDLE" }
+    );
+    println!(
+        "  Provider:   {}",
+        if !status.enabled {
+            "disabled".to_string()
+        } else {
+            status.provider.clone()
+        }
+    );
     if status.enabled {
         println!("  Model:      {}", status.model);
         println!("  Dimensions: {}", status.dimensions);
@@ -608,18 +623,9 @@ fn print_embeddings_status_live(status: &LiveIndexerStatus) {
     println!();
     println!("  Index Progress");
     println!("  ──────────────────────────────────────────────────────────────────────────");
-    println!(
-        "  Indexed:    {} documents",
-        status.documents_indexed
-    );
-    println!(
-        "  Pending:    {} documents",
-        status.documents_pending
-    );
-    println!(
-        "  Progress:   {:.1}%",
-        status.index_progress_pct
-    );
+    println!("  Indexed:    {} documents", status.documents_indexed);
+    println!("  Pending:    {} documents", status.documents_pending);
+    println!("  Progress:   {:.1}%", status.index_progress_pct);
     println!();
 
     if !status.enabled {
@@ -659,7 +665,14 @@ fn print_embeddings_status_db(config: &Config) {
                     println!();
                     println!("  Note: Proxy not running. Showing database snapshot.");
                     println!();
-                    println!("  Provider:   {}", if stats.provider == "none" { "disabled".to_string() } else { stats.provider.clone() });
+                    println!(
+                        "  Provider:   {}",
+                        if stats.provider == "none" {
+                            "disabled".to_string()
+                        } else {
+                            stats.provider.clone()
+                        }
+                    );
                     if stats.provider != "none" {
                         println!("  Model:      {}", stats.model);
                         println!("  Dimensions: {}", stats.dimensions);
@@ -730,9 +743,7 @@ fn handle_embeddings_reindex() {
     let config = Config::from_env();
 
     // Confirm before clearing
-    eprint!(
-        "This will clear all existing embeddings and re-index from scratch.\nContinue? [y/N] "
-    );
+    eprint!("This will clear all existing embeddings and re-index from scratch.\nContinue? [y/N] ");
     std::io::stderr().flush().unwrap();
 
     let mut input = String::new();
@@ -758,12 +769,16 @@ fn handle_embeddings_reindex() {
 
 /// Try to trigger reindex via running proxy API
 fn try_api_trigger_reindex(config: &Config) -> bool {
-    let url = format!("http://{}/api/lifestats/embeddings/reindex", config.bind_addr);
+    let url = format!(
+        "http://{}/api/lifestats/embeddings/reindex",
+        config.bind_addr
+    );
 
     // Use blocking client with short timeout
     let client = match reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_millis(2000))
-        .build() {
+        .build()
+    {
         Ok(c) => c,
         Err(_) => return false,
     };

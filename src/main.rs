@@ -186,9 +186,9 @@ async fn main() -> Result<()> {
     // Generate session ID for this run
     let session_id = generate_session_id();
 
-    // Print startup banner (before TUI takes over screen)
-    startup::print_startup(&config);
-    startup::log_startup(&config);
+    // Create startup registry from config (will be updated during init)
+    let mut registry = startup::StartupRegistry::from_config(&config);
+
     tracing::debug!("Session ID: {}", session_id);
 
     // Create event channels
@@ -268,8 +268,10 @@ async fn main() -> Result<()> {
         let (pipeline, lifestats_query, embedding_indexer) = if config.lifestats.enabled {
             use pipeline::{
                 embedding_indexer::EmbeddingIndexer,
-                embeddings::{self, EmbeddingConfig, ProviderType, AuthMethod},
-                lifestats::LifestatsProcessor, lifestats_query::LifestatsQuery, EventPipeline,
+                embeddings::{self, AuthMethod, EmbeddingConfig, ProviderType},
+                lifestats::LifestatsProcessor,
+                lifestats_query::LifestatsQuery,
+                EventPipeline,
             };
 
             let mut pipeline = EventPipeline::new();
@@ -295,6 +297,7 @@ async fn main() -> Result<()> {
                     // Initialize query interface (read-only connection pool)
                     match LifestatsQuery::new(&config.lifestats.db_path) {
                         Ok(query) => {
+                            registry.activate("lifestats");
                             tracing::info!(
                                 "Lifestats initialized (SQLite: {})",
                                 config.lifestats.db_path.display()
@@ -324,6 +327,7 @@ async fn main() -> Result<()> {
                                     model: config.embeddings.model.clone(),
                                     api_key,
                                     api_base: config.embeddings.api_base.clone(),
+                                    api_version: config.embeddings.api_version.clone(),
                                     auth_method,
                                     dimensions: None, // Auto-detect from model
                                     batch_size: config.embeddings.batch_size,
@@ -350,6 +354,7 @@ async fn main() -> Result<()> {
                                 if provider.is_ready() {
                                     match EmbeddingIndexer::new(indexer_config, provider) {
                                         Ok(indexer) => {
+                                            registry.activate("embeddings");
                                             tracing::info!(
                                                 "Embedding indexer started (provider: {}, model: {})",
                                                 config.embeddings.provider,
@@ -358,6 +363,7 @@ async fn main() -> Result<()> {
                                             Some(indexer)
                                         }
                                         Err(e) => {
+                                            registry.fail("embeddings", e.to_string());
                                             tracing::error!(
                                                 "Failed to start embedding indexer: {}",
                                                 e
@@ -366,6 +372,8 @@ async fn main() -> Result<()> {
                                         }
                                     }
                                 } else {
+                                    registry
+                                        .fail("embeddings", "Provider not ready (check API key)");
                                     tracing::debug!(
                                         "Embedding provider not ready (provider: {})",
                                         config.embeddings.provider
@@ -383,6 +391,7 @@ async fn main() -> Result<()> {
                             )
                         }
                         Err(e) => {
+                            registry.fail("lifestats", e.to_string());
                             tracing::error!(
                                 "Failed to initialize lifestats query interface: {}",
                                 e
@@ -392,6 +401,7 @@ async fn main() -> Result<()> {
                     }
                 }
                 Err(e) => {
+                    registry.fail("lifestats", e.to_string());
                     tracing::error!("Failed to initialize lifestats processor: {}", e);
                     (None, None, None)
                 }
@@ -432,6 +442,10 @@ async fn main() -> Result<()> {
                 .expect("Proxy server failed");
         })
     };
+
+    // Print startup banner AFTER initialization (shows actual status)
+    startup::print_startup_with_registry(&config, &registry);
+    startup::log_startup_with_registry(&config, &registry);
 
     // Run the TUI in the main task
     // This blocks until the user quits (presses 'q')

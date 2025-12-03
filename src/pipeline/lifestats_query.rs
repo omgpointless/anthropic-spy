@@ -119,11 +119,10 @@ impl SearchMode {
                     }
 
                     // Escape special characters but preserve trailing *
-                    let has_wildcard = token.ends_with('*');
-                    let base = if has_wildcard {
-                        &token[..token.len() - 1]
-                    } else {
-                        token
+                    // Using strip_suffix to avoid byte slicing on UTF-8 strings
+                    let (base, has_wildcard) = match token.strip_suffix('*') {
+                        Some(stripped) => (stripped, true),
+                        None => (*token, false),
                     };
 
                     // Escape quotes and parentheses
@@ -1081,11 +1080,7 @@ impl LifestatsQuery {
         results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
         // Take top results
-        let matches: Vec<ThinkingMatch> = results
-            .into_iter()
-            .take(limit)
-            .map(|(_, m)| m)
-            .collect();
+        let matches: Vec<ThinkingMatch> = results.into_iter().take(limit).map(|(_, m)| m).collect();
 
         Ok(matches)
     }
@@ -1221,6 +1216,11 @@ impl LifestatsQuery {
     ///
     /// # Returns
     /// Combined results sorted by RRF score (higher = more relevant)
+    ///
+    /// # Note
+    /// Global (non-user-scoped) version. API uses recover_context_hybrid_user instead.
+    /// Kept for MCP tool that searches across all users.
+    #[allow(dead_code)]
     pub fn recover_context_hybrid(
         &self,
         query: &str,
@@ -1391,7 +1391,8 @@ impl LifestatsQuery {
         for m in self.search_thinking_semantic(query_embedding, limit * 4)? {
             // Filter by user - session_id format is "user_id/session_uuid"
             if let Some(ref session_id) = m.session_id {
-                if session_id.starts_with(user_id) || session_id.contains(&format!("/{}", user_id)) {
+                if session_id.starts_with(user_id) || session_id.contains(&format!("/{}", user_id))
+                {
                     semantic_results.push(ContextMatch {
                         match_type: MatchType::Thinking,
                         session_id: m.session_id,
@@ -1405,7 +1406,8 @@ impl LifestatsQuery {
 
         for m in self.search_prompts_semantic(query_embedding, limit * 4)? {
             if let Some(ref session_id) = m.session_id {
-                if session_id.starts_with(user_id) || session_id.contains(&format!("/{}", user_id)) {
+                if session_id.starts_with(user_id) || session_id.contains(&format!("/{}", user_id))
+                {
                     semantic_results.push(ContextMatch {
                         match_type: MatchType::UserPrompt,
                         session_id: m.session_id,
@@ -1419,7 +1421,8 @@ impl LifestatsQuery {
 
         for m in self.search_responses_semantic(query_embedding, limit * 4)? {
             if let Some(ref session_id) = m.session_id {
-                if session_id.starts_with(user_id) || session_id.contains(&format!("/{}", user_id)) {
+                if session_id.starts_with(user_id) || session_id.contains(&format!("/{}", user_id))
+                {
                     semantic_results.push(ContextMatch {
                         match_type: MatchType::AssistantResponse,
                         session_id: m.session_id,
@@ -1540,11 +1543,9 @@ impl LifestatsQuery {
         }
 
         // Check if any embeddings exist
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM thinking_embeddings",
-            [],
-            |row| row.get(0),
-        )?;
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM thinking_embeddings", [], |row| {
+            row.get(0)
+        })?;
 
         Ok(count > 0)
     }
@@ -1562,21 +1563,20 @@ impl LifestatsQuery {
             )
             .ok();
 
-        let (provider, model, dimensions) = config.unwrap_or_else(|| {
-            ("none".to_string(), "".to_string(), 0)
-        });
+        let (provider, model, dimensions) =
+            config.unwrap_or_else(|| ("none".to_string(), "".to_string(), 0));
 
         // Count embeddings
-        let thinking_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM thinking_embeddings", [], |row| {
+        let thinking_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM thinking_embeddings", [], |row| {
                 row.get(0)
             })?;
-        let prompts_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM prompts_embeddings", [], |row| {
+        let prompts_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM prompts_embeddings", [], |row| {
                 row.get(0)
             })?;
-        let responses_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM responses_embeddings", [], |row| {
+        let responses_count: i64 =
+            conn.query_row("SELECT COUNT(*) FROM responses_embeddings", [], |row| {
                 row.get(0)
             })?;
 
@@ -1586,7 +1586,9 @@ impl LifestatsQuery {
         let prompts_total: i64 =
             conn.query_row("SELECT COUNT(*) FROM user_prompts", [], |row| row.get(0))?;
         let responses_total: i64 =
-            conn.query_row("SELECT COUNT(*) FROM assistant_responses", [], |row| row.get(0))?;
+            conn.query_row("SELECT COUNT(*) FROM assistant_responses", [], |row| {
+                row.get(0)
+            })?;
 
         let embedded = thinking_count + prompts_count + responses_count;
         let total = thinking_total + prompts_total + responses_total;

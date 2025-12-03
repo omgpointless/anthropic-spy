@@ -2,7 +2,7 @@
 description: "Search past sessions (thinking, prompts, responses)"
 ---
 
-Use the `aspy_lifestats_context` MCP tool to search for: $ARGUMENTS
+Use the `aspy_lifestats_context_hybrid` MCP tool to search for: $ARGUMENTS
 
 If no search terms were provided, ask the user: "What would you like to search for across your past sessions?"
 

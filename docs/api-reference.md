@@ -364,6 +364,184 @@ curl -X POST http://127.0.0.1:8080/api/search \
 
 ---
 
+## Lifestats API
+
+The Lifestats API provides access to historical data across all sessions, stored in SQLite with FTS5 indexing.
+
+### GET /api/lifestats/stats
+
+Returns lifetime statistics across all sessions.
+
+**Response:**
+
+```json
+{
+  "total_sessions": 150,
+  "total_tokens": {
+    "input": 5000000,
+    "output": 1500000,
+    "cached": 4500000
+  },
+  "total_cost_usd": 12.34,
+  "by_model": {
+    "claude-sonnet-4-20250514": {
+      "tokens": 4000000,
+      "cost_usd": 8.50
+    },
+    "claude-haiku-3-5-20241022": {
+      "tokens": 2500000,
+      "cost_usd": 3.84
+    }
+  },
+  "tool_usage": {
+    "Read": { "calls": 5000, "avg_duration_ms": 45 },
+    "Edit": { "calls": 2000, "avg_duration_ms": 120 }
+  },
+  "time_range": {
+    "first_session": "2025-11-01T10:00:00Z",
+    "last_session": "2025-12-03T15:30:00Z"
+  }
+}
+```
+
+---
+
+### GET /api/lifestats/context/hybrid/user/:user_id
+
+**Best quality** — Hybrid search combining semantic embeddings with FTS5 keyword matching using Reciprocal Rank Fusion (RRF).
+
+**Path Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `user_id` | API key hash (e.g., `b0acf41e12907b7b`) |
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `topic` | string | required | Search query |
+| `limit` | integer | 10 | Max results (max: 50) |
+| `mode` | string | `phrase` | FTS mode: `phrase`, `natural`, `raw` |
+
+**Response:**
+
+```json
+{
+  "search_type": "hybrid",
+  "query": "authentication",
+  "results": [
+    {
+      "match_type": "thinking",
+      "content": "For the auth system, we should use JWT tokens with...",
+      "session_id": "session-abc123",
+      "timestamp": "2025-12-01T14:30:00Z",
+      "rank_score": -12.34
+    },
+    {
+      "match_type": "user_prompt",
+      "content": "How should we implement login?",
+      "session_id": "session-abc123",
+      "timestamp": "2025-12-01T14:29:00Z",
+      "rank_score": -11.89
+    }
+  ]
+}
+```
+
+**Notes:**
+- `search_type` will be `"fts_only"` if embeddings aren't available
+- Lower `rank_score` = more relevant (BM25 algorithm)
+- `match_type`: `thinking`, `user_prompt`, or `assistant_response`
+
+---
+
+### GET /api/lifestats/context/user/:user_id
+
+FTS-only context search (fallback when embeddings unavailable).
+
+Same parameters and response as hybrid, but `search_type` is always `"fts_only"`.
+
+---
+
+### GET /api/lifestats/search/thinking/user/:user_id
+
+Search only Claude's thinking blocks.
+
+**Query Parameters:** Same as hybrid endpoint.
+
+**Response:**
+
+```json
+{
+  "query": "refactor",
+  "results": [
+    {
+      "content": "I need to refactor this function because...",
+      "session_id": "session-abc123",
+      "timestamp": "2025-12-01T14:30:00Z",
+      "rank_score": -10.5
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/lifestats/search/prompts/user/:user_id
+
+Search only user prompts.
+
+---
+
+### GET /api/lifestats/search/responses/user/:user_id
+
+Search only assistant responses.
+
+---
+
+### GET /api/lifestats/embeddings/status
+
+Check embedding indexer status.
+
+**Response:**
+
+```json
+{
+  "enabled": true,
+  "running": true,
+  "provider": "remote",
+  "model": "text-embedding-3-small",
+  "dimensions": 1536,
+  "documents_indexed": 5000,
+  "documents_pending": 200,
+  "index_progress_pct": 96.2
+}
+```
+
+---
+
+### POST /api/lifestats/embeddings/reindex
+
+Trigger a full reindex of embeddings. Use after changing embedding providers/models.
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "message": "Reindex started"
+}
+```
+
+---
+
+### POST /api/lifestats/embeddings/poll
+
+Force the indexer to check for new content immediately (instead of waiting for poll interval).
+
+---
+
 ## Error Responses
 
 All endpoints may return error responses:

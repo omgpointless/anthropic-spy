@@ -4,8 +4,14 @@
 // - Version info and branding
 // - Configuration loaded from file
 // - Module loading status with checkmarks
+//
+// The StartupRegistry system provides a single source of truth for features:
+// - Config::feature_definitions() defines WHAT features exist
+// - main.rs updates registry with actual init results
+// - This module renders the final status
 
-use crate::config::{Augmentation, Config, Features, VERSION};
+use crate::config::{Config, VERSION};
+use std::collections::HashMap;
 
 /// ANSI color codes for terminal output
 mod colors {
@@ -15,19 +21,214 @@ mod colors {
     pub const CYAN: &str = "\x1b[36m";
     pub const GREEN: &str = "\x1b[32m";
     pub const YELLOW: &str = "\x1b[33m";
+    pub const RED: &str = "\x1b[31m";
     pub const MAGENTA: &str = "\x1b[35m";
 }
 
-/// Module loading result for display
-pub struct ModuleStatus {
-    pub name: &'static str,
-    pub enabled: bool,
-    pub description: &'static str,
+/// Safely truncate a string to at most `max_bytes` while respecting UTF-8 boundaries.
+fn truncate_utf8_safe(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
 }
 
-/// Print the startup banner and module loading status
+// ═══════════════════════════════════════════════════════════════════════════
+// Feature Registry System
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Category for grouping features in startup display
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FeatureCategory {
+    /// Core features - always on (proxy, parser)
+    Core,
+    /// Interface features (tui)
+    Interface,
+    /// Storage features (jsonl, lifestats)
+    Storage,
+    /// Pipeline features (embeddings, augmentations)
+    Pipeline,
+    /// Routing features (multi-client)
+    Routing,
+}
+
+impl FeatureCategory {
+    /// Display order for categories
+    fn order(&self) -> u8 {
+        match self {
+            Self::Core => 0,
+            Self::Interface => 1,
+            Self::Storage => 2,
+            Self::Pipeline => 3,
+            Self::Routing => 4,
+        }
+    }
+
+    /// Human-readable name
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Core => "Core",
+            Self::Interface => "Interface",
+            Self::Storage => "Storage",
+            Self::Pipeline => "Pipeline",
+            Self::Routing => "Routing",
+        }
+    }
+}
+
+/// Status of a feature after initialization
+#[derive(Debug, Clone)]
+pub enum FeatureStatus {
+    /// Feature is running successfully
+    Active,
+    /// Feature is disabled by user in config
+    Disabled,
+    /// Optional feature not configured (no config section)
+    NotConfigured,
+    /// Feature attempted to init but failed
+    Failed(String),
+}
+
+/// Definition of a feature for the registry
+#[derive(Debug, Clone)]
+pub struct FeatureDefinition {
+    /// Unique identifier (used for updates)
+    pub id: &'static str,
+    /// Display name
+    pub name: &'static str,
+    /// Category for grouping
+    pub category: FeatureCategory,
+    /// Current status
+    pub status: FeatureStatus,
+    /// Brief description
+    pub description: &'static str,
+    /// Optional detail (e.g., "remote: text-embedding-3-small")
+    pub detail: Option<String>,
+}
+
+impl FeatureDefinition {
+    /// Create a core feature (always active)
+    pub fn core(id: &'static str, name: &'static str, description: &'static str) -> Self {
+        Self {
+            id,
+            name,
+            category: FeatureCategory::Core,
+            status: FeatureStatus::Active,
+            description,
+            detail: None,
+        }
+    }
+
+    /// Create an optional feature based on enabled flag
+    pub fn optional(
+        id: &'static str,
+        name: &'static str,
+        category: FeatureCategory,
+        enabled: bool,
+        description: &'static str,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            category,
+            status: if enabled {
+                FeatureStatus::Active
+            } else {
+                FeatureStatus::Disabled
+            },
+            description,
+            detail: None,
+        }
+    }
+
+    /// Create a feature that requires configuration
+    pub fn configurable(
+        id: &'static str,
+        name: &'static str,
+        category: FeatureCategory,
+        configured: bool,
+        description: &'static str,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            category,
+            status: if configured {
+                FeatureStatus::Active
+            } else {
+                FeatureStatus::NotConfigured
+            },
+            description,
+            detail: None,
+        }
+    }
+
+    /// Add detail string (builder pattern)
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+}
+
+/// Registry tracking all features and their status
+#[derive(Debug)]
+pub struct StartupRegistry {
+    features: HashMap<&'static str, FeatureDefinition>,
+}
+
+impl StartupRegistry {
+    /// Create registry from config's feature definitions
+    pub fn from_config(config: &Config) -> Self {
+        let definitions = config.feature_definitions();
+        let mut features = HashMap::new();
+        for def in definitions {
+            features.insert(def.id, def);
+        }
+        Self { features }
+    }
+
+    /// Mark a feature as successfully activated
+    pub fn activate(&mut self, id: &'static str) {
+        if let Some(feature) = self.features.get_mut(id) {
+            feature.status = FeatureStatus::Active;
+        }
+    }
+
+    /// Mark a feature as failed with error message
+    pub fn fail(&mut self, id: &'static str, error: impl Into<String>) {
+        if let Some(feature) = self.features.get_mut(id) {
+            feature.status = FeatureStatus::Failed(error.into());
+        }
+    }
+
+    /// Get features grouped by category, sorted
+    pub fn by_category(&self) -> Vec<(FeatureCategory, Vec<&FeatureDefinition>)> {
+        let mut by_cat: HashMap<FeatureCategory, Vec<&FeatureDefinition>> = HashMap::new();
+
+        for feature in self.features.values() {
+            by_cat.entry(feature.category).or_default().push(feature);
+        }
+
+        // Sort by category order
+        let mut result: Vec<_> = by_cat.into_iter().collect();
+        result.sort_by_key(|(cat, _)| cat.order());
+
+        // Sort features within each category by name
+        for (_, features) in &mut result {
+            features.sort_by_key(|f| f.name);
+        }
+
+        result
+    }
+}
+
+/// Print the startup banner and module loading status using the registry
 /// This runs before the TUI takes over the screen (or in headless mode)
-pub fn print_startup(config: &Config) {
+pub fn print_startup_with_registry(config: &Config, registry: &StartupRegistry) {
     use colors::*;
 
     // Banner
@@ -46,12 +247,21 @@ pub fn print_startup(config: &Config) {
     }
     println!();
 
-    // Module loading
+    // Module loading by category
     println!("  {DIM}Loading modules...{RESET}");
 
-    let modules = get_module_status(config);
-    for module in &modules {
-        print_module_status(module);
+    for (category, features) in registry.by_category() {
+        // Skip empty categories
+        if features.is_empty() {
+            continue;
+        }
+
+        // Category header (subtle)
+        println!("  {DIM}─ {} ─{RESET}", category.name());
+
+        for feature in features {
+            print_feature_status(feature);
+        }
     }
 
     println!();
@@ -67,92 +277,99 @@ pub fn print_startup(config: &Config) {
     println!();
 }
 
-/// Get status of all modules based on config
-fn get_module_status(config: &Config) -> Vec<ModuleStatus> {
-    let Features {
-        storage,
-        thinking_panel,
-        stats,
-    } = &config.features;
-
-    let Augmentation {
-        context_warning, ..
-    } = &config.augmentation;
-
-    let mut modules = vec![
-        ModuleStatus {
-            name: "proxy",
-            enabled: true, // Core, always on
-            description: "HTTP interception",
-        },
-        ModuleStatus {
-            name: "parser",
-            enabled: true, // Core, always on
-            description: "Event extraction",
-        },
-        ModuleStatus {
-            name: "tui",
-            enabled: config.enable_tui,
-            description: "Terminal interface",
-        },
-        ModuleStatus {
-            name: "storage",
-            enabled: *storage,
-            description: "JSONL logging",
-        },
-        ModuleStatus {
-            name: "thinking",
-            enabled: *thinking_panel && config.enable_tui,
-            description: "Thinking panel",
-        },
-        ModuleStatus {
-            name: "stats",
-            enabled: *stats,
-            description: "Token tracking",
-        },
-    ];
-
-    // Opt-in augmentations: only show when enabled
-    if *context_warning {
-        modules.push(ModuleStatus {
-            name: "ctx-warn",
-            enabled: true,
-            description: "Context warnings",
-        });
-    }
-
-    modules
-}
-
-/// Print a single module's status
-fn print_module_status(module: &ModuleStatus) {
+/// Print a single feature's status with visual distinction
+fn print_feature_status(feature: &FeatureDefinition) {
     use colors::*;
 
-    let (icon, style) = if module.enabled {
-        (format!("{GREEN}✓{RESET}"), "")
-    } else {
-        (format!("{DIM}○{RESET}"), DIM)
+    let (icon, name_style, desc) = match &feature.status {
+        FeatureStatus::Active => {
+            let detail = feature
+                .detail
+                .as_ref()
+                .map(|d| format!(" ({d})"))
+                .unwrap_or_default();
+            (
+                format!("{GREEN}✓{RESET}"),
+                "",
+                format!("{}{}", feature.description, detail),
+            )
+        }
+        FeatureStatus::Disabled => (
+            format!("{DIM}○{RESET}"),
+            DIM,
+            format!("{} {DIM}(disabled){RESET}", feature.description),
+        ),
+        FeatureStatus::NotConfigured => (
+            format!("{DIM}⊘{RESET}"),
+            DIM,
+            format!("{} {DIM}(not configured){RESET}", feature.description),
+        ),
+        FeatureStatus::Failed(err) => {
+            // Truncate long errors (safely respecting UTF-8 boundaries)
+            let short_err = if err.len() > 30 {
+                format!("{}...", truncate_utf8_safe(err, 30))
+            } else {
+                err.clone()
+            };
+            (
+                format!("{RED}✗{RESET}"),
+                RED,
+                format!("{} {DIM}({}){RESET}", feature.description, short_err),
+            )
+        }
     };
 
     println!(
-        "    {icon} {style}{:<12}{RESET} {DIM}{}{RESET}",
-        module.name, module.description
+        "    {icon} {name_style}{:<12}{RESET} {DIM}{desc}{RESET}",
+        feature.name
     );
 }
 
-/// Print startup messages to TUI log panel
-/// This creates an engaging boot sequence that users see in the System Logs panel
-pub fn log_startup(config: &Config) {
-    // ASCII art header (simple, fits the log format)
+/// Print startup messages to TUI log panel using registry
+pub fn log_startup_with_registry(config: &Config, registry: &StartupRegistry) {
+    // ASCII art header
     tracing::info!("═══════════════════════════════════");
     tracing::info!("  🕵️  ANTHROPIC SPY v{}", VERSION);
     tracing::info!("═══════════════════════════════════");
 
-    // Module loading with individual status
-    let modules = get_module_status(config);
-    for module in &modules {
-        let icon = if module.enabled { "✓" } else { "○" };
-        tracing::info!("  {} {} - {}", icon, module.name, module.description);
+    // Module loading by category
+    for (category, features) in registry.by_category() {
+        if features.is_empty() {
+            continue;
+        }
+
+        tracing::info!("─ {} ─", category.name());
+
+        for feature in features {
+            let icon = match &feature.status {
+                FeatureStatus::Active => "✓",
+                FeatureStatus::Disabled => "○",
+                FeatureStatus::NotConfigured => "⊘",
+                FeatureStatus::Failed(_) => "✗",
+            };
+
+            let detail = feature
+                .detail
+                .as_ref()
+                .map(|d| format!(" ({d})"))
+                .unwrap_or_default();
+
+            let status_note = match &feature.status {
+                FeatureStatus::Active => String::new(),
+                FeatureStatus::Disabled => " [disabled]".to_string(),
+                FeatureStatus::NotConfigured => " [not configured]".to_string(),
+                FeatureStatus::Failed(e) => format!(" [FAILED: {}]", e),
+            };
+
+            tracing::info!(
+                "  {} {} - {}{}{}",
+                icon,
+                feature.name,
+                feature.description,
+                detail,
+                status_note
+            );
+        }
     }
 
     // Proxy ready message
@@ -164,3 +381,5 @@ pub fn log_startup(config: &Config) {
 
     tracing::info!("Ready. Waiting for Claude Code...");
 }
+
+// Old log_startup removed - use log_startup_with_registry instead

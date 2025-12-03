@@ -36,6 +36,30 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+// ─────────────────────────────────────────────────────────────────────────────
+// UTF-8 Safe Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Safely truncate a string to at most `max_bytes` while respecting UTF-8 boundaries.
+///
+/// Returns a string slice that:
+/// - Is at most `max_bytes` long
+/// - Never cuts a multi-byte character in half
+/// - Is always valid UTF-8
+fn truncate_utf8_safe(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+
+    // Find the last valid char boundary at or before max_bytes
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+
+    &s[..end]
+}
+
 /// Configuration for the embedding indexer
 #[derive(Debug, Clone)]
 pub struct IndexerConfig {
@@ -93,12 +117,20 @@ impl IndexerMetrics {
     }
 }
 
+/// Snapshot of indexer metrics for monitoring
+///
+/// Note: Some fields reserved for future metrics API endpoint that exposes
+/// detailed indexer health (error rates, batch throughput). Currently only
+/// documents_embedded/pending are used by status() endpoint.
 #[derive(Debug, Clone)]
 pub struct MetricsSnapshot {
     pub documents_embedded: u64,
     pub documents_pending: u64,
+    #[allow(dead_code)] // Reserved for /api/lifestats/embeddings/metrics endpoint
     pub embedding_errors: u64,
+    #[allow(dead_code)] // Reserved for /api/lifestats/embeddings/metrics endpoint
     pub batches_processed: u64,
+    #[allow(dead_code)] // Reserved for /api/lifestats/embeddings/metrics endpoint
     pub is_processing: bool,
 }
 
@@ -199,6 +231,10 @@ pub struct IndexerHandle {
 
 impl IndexerHandle {
     /// Get current metrics snapshot
+    ///
+    /// Reserved for detailed metrics API. Currently status() is used instead
+    /// which derives key metrics. This exposes raw counters for debugging.
+    #[allow(dead_code)]
     pub fn metrics(&self) -> MetricsSnapshot {
         self.metrics.snapshot()
     }
@@ -283,8 +319,7 @@ impl EmbeddingIndexer {
         let indexer_handle = thread::Builder::new()
             .name("embedding-indexer".into())
             .spawn(move || {
-                if let Err(e) =
-                    Self::indexer_thread(rx, indexer_config, provider, indexer_metrics)
+                if let Err(e) = Self::indexer_thread(rx, indexer_config, provider, indexer_metrics)
                 {
                     tracing::error!("Embedding indexer thread error: {}", e);
                 }
@@ -316,12 +351,20 @@ impl EmbeddingIndexer {
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Direct methods (convenience wrappers around shared state)
+    // These duplicate IndexerHandle methods. Callers use handle() instead.
+    // Kept for potential direct access during testing/debugging.
+    // ─────────────────────────────────────────────────────────────────────────
+
     /// Get current metrics snapshot
+    #[allow(dead_code)] // Use handle().metrics() - this is direct access for testing
     pub fn metrics(&self) -> MetricsSnapshot {
         self.metrics.snapshot()
     }
 
     /// Get current status
+    #[allow(dead_code)] // Use handle().status() - this is direct access for testing
     pub fn status(&self) -> EmbeddingStatus {
         let metrics = self.metrics.snapshot();
         let total = metrics.documents_embedded + metrics.documents_pending;
@@ -343,11 +386,13 @@ impl EmbeddingIndexer {
     }
 
     /// Trigger a poll for new content
+    #[allow(dead_code)] // Use handle().trigger_poll() - this is direct access for testing
     pub fn trigger_poll(&self) {
         let _ = self.tx.try_send(IndexerCommand::Poll);
     }
 
     /// Trigger a full re-index (e.g., after config change)
+    #[allow(dead_code)] // Use handle().trigger_reindex() - this is direct access for testing
     pub fn trigger_reindex(&self) {
         let _ = self.tx.send(IndexerCommand::Reindex);
     }
@@ -386,10 +431,7 @@ impl EmbeddingIndexer {
         // Initial count of pending documents
         let pending = Self::count_pending(&conn)?;
         metrics.documents_pending.store(pending, Ordering::Relaxed);
-        tracing::info!(
-            "Embedding indexer started: {} documents pending",
-            pending
-        );
+        tracing::info!("Embedding indexer started: {} documents pending", pending);
 
         // Track last poll time for periodic polling
         let mut last_poll = Instant::now();
@@ -401,7 +443,13 @@ impl EmbeddingIndexer {
                     // Only process if provider is ready and enough time has passed
                     if provider.is_ready() && last_poll.elapsed() >= config.poll_interval {
                         metrics.is_processing.store(true, Ordering::Relaxed);
-                        Self::process_batch(&conn, &config, provider.as_ref(), &metrics)?;
+                        // Handle errors gracefully - log and continue, don't crash the indexer
+                        if let Err(e) =
+                            Self::process_batch(&conn, &config, provider.as_ref(), &metrics)
+                        {
+                            tracing::error!("Embedding batch failed: {}. Will retry next poll.", e);
+                            metrics.embedding_errors.fetch_add(1, Ordering::Relaxed);
+                        }
                         metrics.is_processing.store(false, Ordering::Relaxed);
                         last_poll = Instant::now();
                     }
@@ -410,10 +458,18 @@ impl EmbeddingIndexer {
                     if provider.is_ready() {
                         tracing::info!("Starting full re-index");
                         metrics.is_processing.store(true, Ordering::Relaxed);
-                        Self::clear_embeddings(&conn)?;
-                        metrics.documents_embedded.store(0, Ordering::Relaxed);
-                        let pending = Self::count_pending(&conn)?;
-                        metrics.documents_pending.store(pending, Ordering::Relaxed);
+                        // Handle reindex errors gracefully
+                        if let Err(e) = Self::clear_embeddings(&conn) {
+                            tracing::error!("Failed to clear embeddings for re-index: {}", e);
+                        } else {
+                            metrics.documents_embedded.store(0, Ordering::Relaxed);
+                            match Self::count_pending(&conn) {
+                                Ok(pending) => {
+                                    metrics.documents_pending.store(pending, Ordering::Relaxed)
+                                }
+                                Err(e) => tracing::error!("Failed to count pending docs: {}", e),
+                            }
+                        }
                         metrics.is_processing.store(false, Ordering::Relaxed);
                     }
                 }
@@ -497,7 +553,11 @@ impl EmbeddingIndexer {
     fn count_pending(conn: &Connection) -> anyhow::Result<u64> {
         let mut total = 0u64;
 
-        for content_type in [ContentType::Thinking, ContentType::Prompt, ContentType::Response] {
+        for content_type in [
+            ContentType::Thinking,
+            ContentType::Prompt,
+            ContentType::Response,
+        ] {
             let count: i64 = conn.query_row(
                 &format!(
                     "SELECT COUNT(*) FROM {} c WHERE NOT EXISTS (SELECT 1 FROM {} e WHERE e.content_id = c.id)",
@@ -532,16 +592,10 @@ impl EmbeddingIndexer {
 
         tracing::debug!("Processing {} documents for embedding", documents.len());
 
-        // Prepare texts for batch embedding
+        // Prepare texts for batch embedding (safely truncated to avoid UTF-8 boundary issues)
         let texts: Vec<&str> = documents
             .iter()
-            .map(|d| {
-                if d.content.len() > config.max_content_length {
-                    &d.content[..config.max_content_length]
-                } else {
-                    d.content.as_str()
-                }
-            })
+            .map(|d| truncate_utf8_safe(&d.content, config.max_content_length))
             .collect();
 
         // Generate embeddings
@@ -559,8 +613,8 @@ impl EmbeddingIndexer {
                 let pending = Self::count_pending(conn)?;
                 metrics.documents_pending.store(pending, Ordering::Relaxed);
 
-                tracing::debug!(
-                    "Embedded {} documents, {} remaining",
+                tracing::info!(
+                    "Embedded {} documents, {} pending",
                     documents.len(),
                     pending
                 );
@@ -588,7 +642,11 @@ impl EmbeddingIndexer {
     fn fetch_pending_documents(conn: &Connection, limit: usize) -> anyhow::Result<Vec<Document>> {
         let mut documents = Vec::new();
 
-        for content_type in [ContentType::Thinking, ContentType::Prompt, ContentType::Response] {
+        for content_type in [
+            ContentType::Thinking,
+            ContentType::Prompt,
+            ContentType::Response,
+        ] {
             if documents.len() >= limit {
                 break;
             }
@@ -743,8 +801,14 @@ mod tests {
     #[test]
     fn test_content_type_tables() {
         assert_eq!(ContentType::Thinking.content_table(), "thinking_blocks");
-        assert_eq!(ContentType::Thinking.embedding_table(), "thinking_embeddings");
+        assert_eq!(
+            ContentType::Thinking.embedding_table(),
+            "thinking_embeddings"
+        );
         assert_eq!(ContentType::Prompt.content_table(), "user_prompts");
-        assert_eq!(ContentType::Response.embedding_table(), "responses_embeddings");
+        assert_eq!(
+            ContentType::Response.embedding_table(),
+            "responses_embeddings"
+        );
     }
 }

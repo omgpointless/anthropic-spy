@@ -6,7 +6,7 @@ description: >
   "I lost context", "before the compact", "previous session", or asks about
   decisions/implementations/discussions that aren't in current context.
   Also use proactively when you notice references to prior work you lack context for.
-allowed-tools: Read, Grep, mcp__plugin_aspy_aspy__aspy_lifestats_context, mcp__plugin_aspy_aspy__aspy_search, mcp__plugin_aspy_aspy__aspy_lifestats_search_thinking, mcp__plugin_aspy_aspy__aspy_lifestats_search_prompts, mcp__plugin_aspy_aspy__aspy_lifestats_search_responses
+allowed-tools: Read, Grep, mcp__plugin_aspy_aspy__aspy_lifestats_context_hybrid, mcp__plugin_aspy_aspy__aspy_lifestats_context, mcp__plugin_aspy_aspy__aspy_search, mcp__plugin_aspy_aspy__aspy_lifestats_search_thinking, mcp__plugin_aspy_aspy__aspy_lifestats_search_prompts, mcp__plugin_aspy_aspy__aspy_lifestats_search_responses
 ---
 
 # Context Recovery
@@ -18,11 +18,12 @@ You've been activated to recover context that was lost to compaction or exists i
 1. **Identify the topic** - What specific context is needed?
    - If the user's request is vague, ask: "What topic should I search for?"
 
-2. **Use the combined search first**:
+2. **Use hybrid search first** (best results):
    ```
-   aspy_lifestats_context(topic="<keywords>", limit=10)
+   aspy_lifestats_context_hybrid(topic="<keywords>", limit=10)
    ```
-   This searches thinking blocks, user prompts, AND assistant responses simultaneously.
+   This combines semantic vector search with FTS5 keyword matching using RRF ranking.
+   Searches thinking blocks, user prompts, AND assistant responses simultaneously.
 
 3. **Synthesize, don't dump** - Summarize findings:
    - What was decided or implemented
@@ -33,14 +34,16 @@ You've been activated to recover context that was lost to compaction or exists i
 
 ## Search Strategy
 
-### Start Narrow
+### Start with Hybrid (Best Quality)
+- `aspy_lifestats_context_hybrid` combines semantic + keyword search
+- Finds conceptually related content even with different wording
 - Use specific keywords from the user's question
 - Default limit of 10 results is usually sufficient
 
-### Expand If Needed
-- Try related terms or broader keywords
-- Increase limit to 20-30 for comprehensive searches
+### Fallback to FTS-Only
+- If hybrid returns insufficient results, try `aspy_lifestats_context`
 - Use `mode: "natural"` for OR-style searches: `"auth OR authentication OR login"`
+- Increase limit to 20-30 for comprehensive searches
 
 ### Targeted Searches (If Combined Is Noisy)
 - `aspy_lifestats_search_thinking` - Claude's reasoning and analysis

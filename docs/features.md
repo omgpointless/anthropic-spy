@@ -30,20 +30,69 @@ Press `s` to switch to Stats view, `Tab` to cycle through tabs.
 
 ![Stats dashboard](images/features/stats-001.png)
 
-## Context Recall
+## Context Recall & Lifestats
 
-Search across all your past sessions. When compaction wipes context, the logs remain.
+Search across all your past sessions. When compaction wipes context, the logs remain—indexed and searchable.
 
-- **Full-text search** across session history
-- **Query from Claude** via MCP tools (`aspy_search`)
-- **Recover decisions** — find why you made that architectural choice 3 weeks ago
-- **Cross-session continuity** — new Claude instances can recall what previous ones discovered
+### SQLite-Backed Storage
 
-This isn't just logging—it's a searchable memory of your AI-assisted development journey.
+All session data is stored in a local SQLite database (`~/.local/share/aspy/lifestats.db`) with FTS5 full-text indexing. This enables:
+
+- **Fast full-text search** across thinking blocks, prompts, and responses
+- **Lifetime statistics** — token usage, costs, and tool breakdowns across all sessions
+- **Hybrid search** — combine semantic embeddings with keyword matching (see below)
+
+JSONL logs remain for portability and `jq` analysis; SQLite adds efficient querying at scale.
+
+### Query from Claude
+
+Use MCP tools to search your history without leaving Claude Code:
+
+```
+"Search my past sessions for discussions about authentication"
+```
+
+Claude uses `aspy_lifestats_context_hybrid` to find relevant thinking blocks, prompts, and responses—even if you used different terminology.
 
 ![Context Recall](images/features/context-recall-001.gif)
 
-> **Coming soon:** Local SQLite storage for faster querying and smarter context management. JSONL files will remain for portability; SQLite adds efficient indexing for recall at scale.
+### Lifetime Statistics
+
+Track your Claude Code usage across all sessions:
+
+- **Total tokens** — input, output, cached across all time
+- **Costs by model** — see spending breakdown (Opus vs Sonnet vs Haiku)
+- **Tool usage patterns** — which tools you use most, success rates
+- **Session history** — when you started, how many sessions
+
+Use `/aspy:lifestats` or the `aspy_lifestats_stats` MCP tool.
+
+## Semantic Search
+
+Take context recovery to the next level with embeddings-powered hybrid search.
+
+### How It Works
+
+1. **Embedding Indexer** — Runs in the background, converting your session history into vector embeddings
+2. **Hybrid Search** — Combines semantic similarity (understands meaning) with FTS5 keyword matching (finds exact terms)
+3. **RRF Ranking** — Reciprocal Rank Fusion merges both result sets for optimal relevance
+
+### Why It Matters
+
+- **Find by concept, not just keywords** — Search for "auth" and find discussions about "login", "JWT", "sessions"
+- **Better context recovery** — When you lose context to compaction, hybrid search finds what you need faster
+- **Low cost** — ~$0.02 to embed 1M tokens with OpenAI's `text-embedding-3-small`
+
+### Configuration
+
+```toml
+[embeddings]
+provider = "remote"                    # or "local" for offline
+model = "text-embedding-3-small"
+api_base = "https://api.openai.com/v1"
+```
+
+Supports OpenAI, Azure OpenAI, Ollama, and local MiniLM models. See the [Semantic Search Guide](semantic-search-guide.md) for full setup.
 
 ## Context Warnings
 
@@ -178,10 +227,20 @@ Quick access to session data without leaving your flow:
 
 | Command | Description |
 |---------|-------------|
-| `/aspy:stats` | Token counts, costs, cache efficiency at a glance |
-| `/aspy:context` | Context window status and warning level |
+| `/aspy:stats` | Current session token counts, costs, cache efficiency |
+| `/aspy:lifestats` | Lifetime statistics across all sessions |
+| `/aspy:window` | Context window usage percentage and warning level |
 | `/aspy:events` | Recent tool calls and results |
-| `/aspy:tempcontext` | Prepare context for compaction (see [Context Warnings](#context-warnings)) |
+| `/aspy:search <query>` | Hybrid search across all past sessions |
+| `/aspy:search-thinking <query>` | Search Claude's past thinking blocks |
+| `/aspy:search-prompts <query>` | Search your past prompts |
+| `/aspy:search-responses <query>` | Search Claude's past responses |
+| `/aspy:pre-compact` | Generate context file before compaction |
+
+Install the plugin to get these commands:
+```bash
+claude mcp add aspy -- npx -y aspy-mcp
+```
 
 ## MCP Integration
 
@@ -191,11 +250,25 @@ Query session data programmatically from within Claude Code:
 claude mcp add aspy -- npx -y aspy-mcp
 ```
 
-Available tools:
-- `aspy_stats` — Token counts, costs, cache efficiency
-- `aspy_events` — Recent tool calls and results
-- `aspy_context` — Context window percentage and warnings
-- `aspy_search` — Search past session logs
+### Current Session Tools
+| Tool | Description |
+|------|-------------|
+| `aspy_stats` | Token counts, costs, cache efficiency for current session |
+| `aspy_events` | Recent tool calls and results |
+| `aspy_context` | Context window percentage and warnings |
+| `aspy_sessions` | List all active sessions |
+| `aspy_search` | Search JSONL logs (current session, real-time) |
+
+### Lifestats Tools (All Sessions)
+| Tool | Description |
+|------|-------------|
+| `aspy_lifestats_stats` | Lifetime token usage, costs, tool breakdown |
+| `aspy_lifestats_context_hybrid` | **Best** — Hybrid semantic + FTS search |
+| `aspy_lifestats_context` | FTS-only combined search (fallback) |
+| `aspy_lifestats_search_thinking` | Search thinking blocks only |
+| `aspy_lifestats_search_prompts` | Search user prompts only |
+| `aspy_lifestats_search_responses` | Search assistant responses only |
+| `aspy_lifestats_embeddings_status` | Check embedding indexer status |
 
 ## Keyboard Navigation
 

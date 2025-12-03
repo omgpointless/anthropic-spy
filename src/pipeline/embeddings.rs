@@ -72,6 +72,11 @@ pub struct BatchEmbeddingResult {
 }
 
 /// Error type for embedding operations
+/// Errors that can occur during embedding operations
+///
+/// Some variants are reserved for specific provider implementations:
+/// - ModelLoadError: local ONNX providers (requires --features local-embeddings)
+/// - TextTooLong: when input exceeds model context window
 #[derive(Debug)]
 pub enum EmbeddingError {
     /// Provider is not configured or disabled
@@ -83,8 +88,10 @@ pub enum EmbeddingError {
     /// Network error
     NetworkError(String),
     /// Model loading error (local provider)
+    #[allow(dead_code)] // Used by local-embeddings feature (ONNX model loading)
     ModelLoadError(String),
     /// Text too long for model's context window
+    #[allow(dead_code)] // Reserved for chunking/truncation implementation
     TextTooLong { max_tokens: usize },
     /// Internal error
     Internal(String),
@@ -172,6 +179,10 @@ pub struct EmbeddingConfig {
     /// - OpenRouter: "https://openrouter.ai/api/v1"
     pub api_base: Option<String>,
 
+    /// API version query parameter (for Azure AI Foundry)
+    /// - Azure: "preview" or specific version like "2024-10-21"
+    pub api_version: Option<String>,
+
     /// Authentication method for remote providers
     /// - Bearer: Authorization: Bearer {key} (OpenAI, OpenRouter)
     /// - ApiKey: api-key: {key} (Azure)
@@ -195,6 +206,7 @@ impl Default for EmbeddingConfig {
             model: String::new(),
             api_key: None,
             api_base: None,
+            api_version: None,
             auth_method: AuthMethod::Bearer,
             dimensions: None,
             batch_size: 32,
@@ -203,6 +215,14 @@ impl Default for EmbeddingConfig {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Convenience constructors for programmatic config
+// Currently config is loaded from TOML (config.rs), but these are useful for:
+// - Tests
+// - Future CLI quick-setup commands (e.g., `aspy embeddings --setup openai`)
+// - Library usage if extracted as a crate
+// ─────────────────────────────────────────────────────────────────────────────
+#[allow(dead_code)]
 impl EmbeddingConfig {
     /// Create config for local MiniLM model
     pub fn local_minilm() -> Self {
@@ -326,6 +346,15 @@ impl EmbeddingConfig {
 /// # Thread Safety
 ///
 /// Providers must be `Send + Sync` for use across threads.
+///
+/// # Note on unused methods
+///
+/// Some trait methods (name, dimensions, shutdown) are not called in current
+/// code paths but are part of the provider contract for:
+/// - Logging and debugging (name)
+/// - Validation and status reporting (dimensions)
+/// - Resource cleanup (shutdown)
+#[allow(unused)]
 pub trait EmbeddingProvider: Send + Sync {
     /// Human-readable name for logging
     fn name(&self) -> &'static str;
@@ -435,6 +464,8 @@ pub struct OpenAiCompatibleProvider {
     api_key: String,
     auth_method: AuthMethod,
     model: String,
+    api_version: Option<String>,
+    #[allow(dead_code)] // Used by dimensions() trait method, reserved for status reporting
     dimensions: usize,
 }
 
@@ -447,12 +478,17 @@ impl OpenAiCompatibleProvider {
     /// # Errors
     /// Returns an error if API key is missing or client creation fails
     pub fn new(config: &EmbeddingConfig) -> Result<Self, EmbeddingError> {
-        let api_key = config.api_key.clone().ok_or(EmbeddingError::NotConfigured)?;
+        let api_key = config
+            .api_key
+            .clone()
+            .ok_or(EmbeddingError::NotConfigured)?;
 
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(config.timeout_secs))
             .build()
-            .map_err(|e| EmbeddingError::NetworkError(format!("Failed to create HTTP client: {}", e)))?;
+            .map_err(|e| {
+                EmbeddingError::NetworkError(format!("Failed to create HTTP client: {}", e))
+            })?;
 
         let base_url = config.get_api_base().to_string();
         let dimensions = config.get_dimensions();
@@ -471,13 +507,19 @@ impl OpenAiCompatibleProvider {
             api_key,
             auth_method: config.auth_method.clone(),
             model: config.model.clone(),
+            api_version: config.api_version.clone(),
             dimensions,
         })
     }
 
     /// Build the embeddings request
     fn build_request(&self, input: &[&str]) -> reqwest::blocking::RequestBuilder {
-        let url = format!("{}/embeddings", self.base_url.trim_end_matches('/'));
+        // Build URL with optional api-version query parameter (required for Azure AI Foundry)
+        let base = format!("{}/embeddings", self.base_url.trim_end_matches('/'));
+        let url = match &self.api_version {
+            Some(version) => format!("{}?api-version={}", base, version),
+            None => base,
+        };
 
         let mut req = self.client.post(&url);
 
@@ -495,18 +537,25 @@ impl OpenAiCompatibleProvider {
     }
 
     /// Parse the embeddings response
-    fn parse_response(&self, response: reqwest::blocking::Response) -> Result<BatchEmbeddingResult, EmbeddingError> {
+    fn parse_response(
+        &self,
+        response: reqwest::blocking::Response,
+    ) -> Result<BatchEmbeddingResult, EmbeddingError> {
         let status = response.status();
 
         if !status.is_success() {
             let status_code = status.as_u16();
 
             // Try to parse error body
-            let error_text = response.text().unwrap_or_else(|_| "Unknown error".to_string());
+            let error_text = response
+                .text()
+                .unwrap_or_else(|_| "Unknown error".to_string());
 
             // Check for rate limiting
             if status_code == 429 {
-                return Err(EmbeddingError::RateLimited { retry_after_secs: None });
+                return Err(EmbeddingError::RateLimited {
+                    retry_after_secs: None,
+                });
             }
 
             return Err(EmbeddingError::ApiError {
@@ -516,9 +565,9 @@ impl OpenAiCompatibleProvider {
         }
 
         // Parse successful response
-        let body: OpenAiEmbeddingResponse = response.json().map_err(|e| {
-            EmbeddingError::Internal(format!("Failed to parse response: {}", e))
-        })?;
+        let body: OpenAiEmbeddingResponse = response
+            .json()
+            .map_err(|e| EmbeddingError::Internal(format!("Failed to parse response: {}", e)))?;
 
         // Sort by index and extract embeddings
         let mut data = body.data;
@@ -569,7 +618,9 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
         let result = self.embed_batch(&[text])?;
 
         if result.embeddings.is_empty() {
-            return Err(EmbeddingError::Internal("No embedding returned".to_string()));
+            return Err(EmbeddingError::Internal(
+                "No embedding returned".to_string(),
+            ));
         }
 
         Ok(EmbeddingResult {
@@ -587,9 +638,9 @@ impl EmbeddingProvider for OpenAiCompatibleProvider {
         }
 
         let request = self.build_request(texts);
-        let response = request.send().map_err(|e| {
-            EmbeddingError::NetworkError(format!("Request failed: {}", e))
-        })?;
+        let response = request
+            .send()
+            .map_err(|e| EmbeddingError::NetworkError(format!("Request failed: {}", e)))?;
 
         self.parse_response(response)
     }
@@ -624,15 +675,13 @@ pub fn create_provider(config: &EmbeddingConfig) -> Box<dyn EmbeddingProvider> {
                 Box::new(NoOpProvider::new())
             }
         }
-        ProviderType::Remote => {
-            match OpenAiCompatibleProvider::new(config) {
-                Ok(provider) => Box::new(provider),
-                Err(e) => {
-                    tracing::error!("Failed to create remote embedding provider: {}", e);
-                    Box::new(NoOpProvider::new())
-                }
+        ProviderType::Remote => match OpenAiCompatibleProvider::new(config) {
+            Ok(provider) => Box::new(provider),
+            Err(e) => {
+                tracing::error!("Failed to create remote embedding provider: {}", e);
+                Box::new(NoOpProvider::new())
             }
-        }
+        },
     }
 }
 
@@ -732,7 +781,9 @@ impl EmbeddingProvider for LocalProvider {
             .map_err(|e| EmbeddingError::Internal(format!("Embedding failed: {}", e)))?;
 
         if embeddings.is_empty() {
-            return Err(EmbeddingError::Internal("No embedding returned".to_string()));
+            return Err(EmbeddingError::Internal(
+                "No embedding returned".to_string(),
+            ));
         }
 
         Ok(EmbeddingResult {

@@ -1551,7 +1551,9 @@ pub async fn lifestats_embedding_reindex(
             message: "Reindex triggered. The indexer will clear existing embeddings and re-process all content.".to_string(),
         }))
     } else {
-        Err(ApiError::NotFound("Embedding indexer not running. Start aspy with embeddings configured.".to_string()))
+        Err(ApiError::NotFound(
+            "Embedding indexer not running. Start aspy with embeddings configured.".to_string(),
+        ))
     }
 }
 
@@ -1568,7 +1570,9 @@ pub async fn lifestats_embedding_poll(
             message: "Poll triggered. The indexer will check for un-embedded content.".to_string(),
         }))
     } else {
-        Err(ApiError::NotFound("Embedding indexer not running.".to_string()))
+        Err(ApiError::NotFound(
+            "Embedding indexer not running.".to_string(),
+        ))
     }
 }
 
@@ -1612,9 +1616,7 @@ pub async fn lifestats_context_hybrid_user(
     let limit = params.limit.min(50);
 
     // Check if embeddings are available
-    let has_embeddings = query_interface
-        .has_embeddings()
-        .unwrap_or(false);
+    let has_embeddings = query_interface.has_embeddings().unwrap_or(false);
 
     // Try to create query embedding if embeddings are enabled
     let query_embedding = if has_embeddings {
@@ -1643,9 +1645,10 @@ pub async fn lifestats_context_hybrid_user(
                 model: config.embeddings.model.clone(),
                 api_key,
                 api_base: config.embeddings.api_base.clone(),
+                api_version: config.embeddings.api_version.clone(),
                 auth_method,
                 dimensions: None,
-                batch_size: 1, // Only need one embedding
+                batch_size: 1,    // Only need one embedding
                 timeout_secs: 10, // Short timeout for query
             };
 
@@ -1672,7 +1675,13 @@ pub async fn lifestats_context_hybrid_user(
     // Perform hybrid or FTS-only search
     let (search_type, results) = if let Some(ref embedding) = query_embedding {
         let results = query_interface
-            .recover_context_hybrid_user(&user_id, &params.topic, Some(embedding), limit, params.mode)
+            .recover_context_hybrid_user(
+                &user_id,
+                &params.topic,
+                Some(embedding),
+                limit,
+                params.mode,
+            )
             .map_err(|e| ApiError::Internal(format!("Hybrid search failed: {}", e)))?;
         ("hybrid".to_string(), results)
     } else {

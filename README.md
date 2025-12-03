@@ -56,7 +56,10 @@ Add aspy to Claude Code's MCP servers:
 claude mcp add aspy -- npx -y aspy-mcp
 ```
 
-This gives Claude Code access to session stats, events, and context window status via tools like `aspy_stats`, `aspy_events`, and `aspy_context`.
+This gives Claude Code access to:
+- **Current session**: `aspy_stats`, `aspy_events`, `aspy_context`
+- **Lifetime history**: `aspy_lifestats_stats`, `aspy_lifestats_context_hybrid` (semantic + keyword search)
+- **Context recovery**: Search past thinking blocks, prompts, and responses across all sessions
 
 > **Note**: Requires the TUI proxy running to collect data.
 
@@ -91,6 +94,7 @@ Generates mock events to showcase the interface.
 | [Themes](docs/themes.md) | 32 bundled themes + custom TOML |
 | [Multi-Client Routing](docs/sessions.md) | Track multiple Claude instances |
 | [REST API](docs/api-reference.md) | Programmatic endpoints |
+| [Semantic Search](docs/semantic-search-guide.md) | Configure embeddings for hybrid search |
 | [Architecture](docs/architecture.md) | For contributors |
 
 ## Package Managers

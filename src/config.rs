@@ -76,6 +76,8 @@ pub struct EmbeddingsConfig {
     pub model: String,
     /// API base URL for remote providers
     pub api_base: Option<String>,
+    /// API version query parameter (e.g., "preview" for Azure AI Foundry)
+    pub api_version: Option<String>,
     /// Authentication method: "bearer" or "api-key"
     pub auth_method: String,
     /// Polling interval for background indexer (seconds)
@@ -94,6 +96,7 @@ impl Default for EmbeddingsConfig {
             provider: "none".to_string(),
             model: String::new(),
             api_base: None,
+            api_version: None,
             auth_method: "bearer".to_string(),
             poll_interval_secs: 30,
             batch_size: 32,
@@ -337,6 +340,7 @@ struct FileEmbeddingsConfig {
     provider: Option<String>,
     model: Option<String>,
     api_base: Option<String>,
+    api_version: Option<String>,
     auth_method: Option<String>,
     poll_interval_secs: Option<u64>,
     batch_size: Option<usize>,
@@ -732,11 +736,10 @@ max_content_length = {embed_max_content}
         let file_embeddings = file.embeddings.unwrap_or_default();
         let embed_defaults = EmbeddingsConfig::default();
         let embeddings = EmbeddingsConfig {
-            provider: file_embeddings
-                .provider
-                .unwrap_or(embed_defaults.provider),
+            provider: file_embeddings.provider.unwrap_or(embed_defaults.provider),
             model: file_embeddings.model.unwrap_or(embed_defaults.model),
             api_base: file_embeddings.api_base.or(embed_defaults.api_base),
+            api_version: file_embeddings.api_version.or(embed_defaults.api_version),
             auth_method: file_embeddings
                 .auth_method
                 .unwrap_or(embed_defaults.auth_method),
@@ -808,5 +811,116 @@ impl Default for Config {
             embeddings: EmbeddingsConfig::default(),
             clients: ClientsConfig::default(),
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Feature Definitions for StartupRegistry
+// ─────────────────────────────────────────────────────────────────────────────
+// This is the SINGLE SOURCE OF TRUTH for what features exist.
+// Adding a new feature? Add it here, and it shows up in startup automatically.
+
+impl Config {
+    /// Get all feature definitions based on current configuration.
+    ///
+    /// This is the single source of truth for what features exist in Aspy.
+    /// The StartupRegistry uses this to build the startup display.
+    /// main.rs can update statuses based on actual initialization results.
+    pub fn feature_definitions(&self) -> Vec<crate::startup::FeatureDefinition> {
+        use crate::startup::{FeatureCategory, FeatureDefinition};
+
+        let mut features = vec![
+            // ─────────────────────────────────────────────────────────────────
+            // Core (always enabled)
+            // ─────────────────────────────────────────────────────────────────
+            FeatureDefinition::core("proxy", "proxy", "HTTP interception"),
+            FeatureDefinition::core("parser", "parser", "Event extraction"),
+            // ─────────────────────────────────────────────────────────────────
+            // Interface
+            // ─────────────────────────────────────────────────────────────────
+            FeatureDefinition::optional(
+                "tui",
+                "tui",
+                FeatureCategory::Interface,
+                self.enable_tui,
+                "Terminal interface",
+            ),
+            // ─────────────────────────────────────────────────────────────────
+            // Storage
+            // ─────────────────────────────────────────────────────────────────
+            FeatureDefinition::optional(
+                "storage",
+                "storage",
+                FeatureCategory::Storage,
+                self.features.storage,
+                "JSONL logging",
+            ),
+            FeatureDefinition::optional(
+                "lifestats",
+                "lifestats",
+                FeatureCategory::Storage,
+                self.lifestats.enabled,
+                "SQLite history",
+            ),
+            // ─────────────────────────────────────────────────────────────────
+            // Pipeline
+            // ─────────────────────────────────────────────────────────────────
+            FeatureDefinition::optional(
+                "thinking",
+                "thinking",
+                FeatureCategory::Pipeline,
+                self.features.thinking_panel && self.enable_tui,
+                "Thinking panel",
+            ),
+            FeatureDefinition::optional(
+                "stats",
+                "stats",
+                FeatureCategory::Pipeline,
+                self.features.stats,
+                "Token tracking",
+            ),
+            FeatureDefinition::optional(
+                "ctx-warn",
+                "ctx-warn",
+                FeatureCategory::Pipeline,
+                self.augmentation.context_warning,
+                "Context warnings",
+            ),
+        ];
+
+        // Embeddings: configurable (needs setup, not just enable/disable)
+        let embeddings_def = if self.embeddings.is_enabled() {
+            FeatureDefinition::configurable(
+                "embeddings",
+                "embeddings",
+                FeatureCategory::Pipeline,
+                true,
+                "Semantic search",
+            )
+            .with_detail(format!(
+                "{}: {}",
+                self.embeddings.provider, self.embeddings.model
+            ))
+        } else {
+            FeatureDefinition::configurable(
+                "embeddings",
+                "embeddings",
+                FeatureCategory::Pipeline,
+                false,
+                "Semantic search",
+            )
+        };
+        features.push(embeddings_def);
+
+        // Routing: configurable (needs client definitions)
+        features.push(FeatureDefinition::configurable(
+            "routing",
+            "routing",
+            FeatureCategory::Routing,
+            self.clients.is_configured(),
+            "Multi-client",
+        ));
+
+        features
     }
 }

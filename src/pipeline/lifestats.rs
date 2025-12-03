@@ -28,6 +28,18 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+/// Safely truncate a string to at most `max_bytes` while respecting UTF-8 boundaries.
+fn truncate_utf8_safe(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Known Claude Code rejection message patterns.
 /// These indicate the user rejected a tool call (not an actual error).
 const REJECTION_PATTERNS: &[&str] = &[
@@ -890,11 +902,11 @@ impl LifestatsProcessor {
                 content,
                 token_estimate,
             } if config.store_thinking => {
-                // Truncate if too large
+                // Truncate if too large (safely respecting UTF-8 boundaries)
                 let content = if content.len() > config.max_thinking_size {
                     format!(
                         "{}... [truncated, {} bytes total]",
-                        &content[..config.max_thinking_size],
+                        truncate_utf8_safe(&content, config.max_thinking_size),
                         content.len()
                     )
                 } else {
