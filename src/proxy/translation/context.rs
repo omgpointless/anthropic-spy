@@ -27,17 +27,26 @@ use std::sync::Arc;
 // Model Mapping
 // ============================================================================
 
-/// Bidirectional model name mapping between API formats
+/// Model name mapping for Claude Code → OpenAI-compatible endpoints
 ///
-/// Maps model names from one API format to another. For example:
-/// - OpenAI `gpt-4` → Anthropic `claude-sonnet-4-20250514`
-/// - Anthropic `claude-sonnet-4-20250514` → OpenAI `gpt-4` (reverse lookup)
+/// Primary use case: Claude Code sends Anthropic model names, we map them
+/// to whatever backend you're targeting (OpenRouter, Azure, local Ollama, etc.)
+///
+/// Config format (Claude Code perspective):
+/// ```toml
+/// [translation.model_mapping]
+/// "haiku" = "xai/grok-code-fast"
+/// "sonnet" = "openai/gpt-5.1"
+/// "opus" = "amazon/nova-2-lite-v1:free"
+/// ```
+///
+/// Supports partial matching: "haiku" matches "claude-haiku-4-5-20251001"
 #[derive(Debug, Clone, Default)]
 pub struct ModelMapping {
-    /// OpenAI model name → Anthropic model name
-    openai_to_anthropic: HashMap<String, String>,
-    /// Anthropic model name → OpenAI model name (reverse)
-    anthropic_to_openai: HashMap<String, String>,
+    /// Anthropic pattern → target model (primary direction: Claude Code → backend)
+    anthropic_to_target: HashMap<String, String>,
+    /// Target model → Anthropic pattern (reverse direction, for completeness)
+    target_to_anthropic: HashMap<String, String>,
 }
 
 impl ModelMapping {
@@ -47,65 +56,59 @@ impl ModelMapping {
     }
 
     /// Create mapping from config HashMap
+    ///
+    /// Config keys are Anthropic patterns (what Claude Code sends),
+    /// values are target models (where requests go).
     pub fn from_config(config: &HashMap<String, String>) -> Self {
         let mut mapping = Self::new();
-        for (openai_model, anthropic_model) in config {
-            mapping.add(openai_model.clone(), anthropic_model.clone());
+        for (anthropic_pattern, target_model) in config {
+            mapping.add(anthropic_pattern.clone(), target_model.clone());
         }
         mapping
     }
 
-    /// Add a bidirectional mapping
-    pub fn add(&mut self, openai_model: String, anthropic_model: String) {
-        self.anthropic_to_openai
-            .insert(anthropic_model.clone(), openai_model.clone());
-        self.openai_to_anthropic
-            .insert(openai_model, anthropic_model);
+    /// Add a mapping (anthropic_pattern → target)
+    pub fn add(&mut self, anthropic_pattern: String, target_model: String) {
+        self.target_to_anthropic
+            .insert(target_model.clone(), anthropic_pattern.clone());
+        self.anthropic_to_target
+            .insert(anthropic_pattern, target_model);
     }
 
-    /// Map OpenAI model name to Anthropic
+    /// Map Anthropic model to target (Claude Code → backend)
     ///
-    /// Returns the mapped name, or the original if no mapping exists.
-    pub fn to_anthropic(&self, openai_model: &str) -> String {
-        self.openai_to_anthropic
-            .get(openai_model)
+    /// Supports partial matching: "haiku" in config matches "claude-haiku-4-5-20251001"
+    pub fn to_target(&self, anthropic_model: &str) -> String {
+        // Try exact match first
+        if let Some(target) = self.anthropic_to_target.get(anthropic_model) {
+            return target.clone();
+        }
+
+        // Try partial match (config key contained in model name)
+        let model_lower = anthropic_model.to_lowercase();
+        for (pattern, target) in &self.anthropic_to_target {
+            if model_lower.contains(&pattern.to_lowercase()) {
+                return target.clone();
+            }
+        }
+
+        // No match - pass through unchanged
+        anthropic_model.to_string()
+    }
+
+    /// Map target model back to Anthropic (reverse direction)
+    ///
+    /// Used when OpenAI clients talk to Claude backend (secondary use case).
+    pub fn to_anthropic(&self, target_model: &str) -> String {
+        self.target_to_anthropic
+            .get(target_model)
             .cloned()
-            .unwrap_or_else(|| {
-                // Default mapping for common models
-                match openai_model {
-                    "gpt-4" | "gpt-4-turbo" | "gpt-4-turbo-preview" | "gpt-4o" => {
-                        "claude-sonnet-4-20250514".to_string()
-                    }
-                    "gpt-4o-mini" | "gpt-3.5-turbo" | "gpt-3.5-turbo-16k" => {
-                        "claude-3-haiku-20240307".to_string()
-                    }
-                    "o1" | "o1-preview" => "claude-sonnet-4-20250514".to_string(),
-                    "o1-mini" => "claude-3-haiku-20240307".to_string(),
-                    // Pass through unknown models (may work if Anthropic adds aliases)
-                    _ => openai_model.to_string(),
-                }
-            })
+            .unwrap_or_else(|| target_model.to_string())
     }
 
-    /// Map Anthropic model name back to OpenAI
-    ///
-    /// Returns the mapped name, or a sensible default if no mapping exists.
+    /// Alias for to_target (backwards compatibility with existing code)
     pub fn to_openai(&self, anthropic_model: &str) -> String {
-        self.anthropic_to_openai
-            .get(anthropic_model)
-            .cloned()
-            .unwrap_or_else(|| {
-                // Default reverse mapping
-                if anthropic_model.contains("opus") {
-                    "gpt-4".to_string()
-                } else if anthropic_model.contains("sonnet") {
-                    "gpt-4-turbo".to_string()
-                } else if anthropic_model.contains("haiku") {
-                    "gpt-3.5-turbo".to_string()
-                } else {
-                    "gpt-4".to_string()
-                }
-            })
+        self.to_target(anthropic_model)
     }
 }
 
@@ -278,7 +281,7 @@ impl TranslationContext {
     /// Get the model name to use in responses
     ///
     /// Prefers the original model name from the request, falls back to
-    /// mapping the response model, or returns a default.
+    /// mapping the response model, or passes through the response model as-is.
     #[allow(dead_code)]
     pub fn response_model_name(&self) -> String {
         if let Some(ref original) = self.original_model {
@@ -287,7 +290,8 @@ impl TranslationContext {
         if let Some(ref response) = self.response_model {
             return self.model_mapping.to_openai(response);
         }
-        "gpt-4".to_string()
+        // No model information available - this shouldn't happen in practice
+        "unknown".to_string()
     }
 }
 
@@ -317,44 +321,62 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_model_mapping_defaults() {
+    fn test_model_mapping_passthrough() {
         let mapping = ModelMapping::new();
 
-        assert_eq!(mapping.to_anthropic("gpt-4"), "claude-sonnet-4-20250514");
+        // No mappings - everything passes through unchanged
         assert_eq!(
-            mapping.to_anthropic("gpt-3.5-turbo"),
-            "claude-3-haiku-20240307"
+            mapping.to_target("claude-haiku-4-5-20251001"),
+            "claude-haiku-4-5-20251001"
         );
-        assert_eq!(mapping.to_anthropic("unknown-model"), "unknown-model");
+        assert_eq!(mapping.to_target("unknown-model"), "unknown-model");
+        assert_eq!(mapping.to_anthropic("gpt-4"), "gpt-4");
     }
 
     #[test]
-    fn test_model_mapping_custom() {
+    fn test_model_mapping_claude_code_perspective() {
         let mut config = HashMap::new();
-        config.insert("my-gpt".to_string(), "my-claude".to_string());
+        // Config: what Claude Code sends = where it goes
+        config.insert("haiku".to_string(), "xai/grok-code-fast".to_string());
+        config.insert("sonnet".to_string(), "openai/gpt-5.1".to_string());
+        config.insert("opus".to_string(), "amazon/nova-2-lite-v1:free".to_string());
 
         let mapping = ModelMapping::from_config(&config);
 
-        assert_eq!(mapping.to_anthropic("my-gpt"), "my-claude");
-        assert_eq!(mapping.to_openai("my-claude"), "my-gpt");
+        // Partial matching: "haiku" matches full model name
+        assert_eq!(
+            mapping.to_target("claude-haiku-4-5-20251001"),
+            "xai/grok-code-fast"
+        );
+        assert_eq!(
+            mapping.to_target("claude-sonnet-4-20250514"),
+            "openai/gpt-5.1"
+        );
+        assert_eq!(
+            mapping.to_target("claude-opus-4-20250514"),
+            "amazon/nova-2-lite-v1:free"
+        );
+
+        // Unmapped passes through
+        assert_eq!(mapping.to_target("some-random-model"), "some-random-model");
     }
 
     #[test]
-    fn test_model_mapping_reverse() {
-        let mapping = ModelMapping::new();
+    fn test_model_mapping_exact_match_priority() {
+        let mut config = HashMap::new();
+        // Exact match should take priority over partial
+        config.insert(
+            "claude-haiku-4-5-20251001".to_string(),
+            "exact-target".to_string(),
+        );
+        config.insert("haiku".to_string(), "partial-target".to_string());
 
-        // Default reverse mappings
+        let mapping = ModelMapping::from_config(&config);
+
+        // Exact match wins
         assert_eq!(
-            mapping.to_openai("claude-3-opus-20240229"),
-            "gpt-4".to_string()
-        );
-        assert_eq!(
-            mapping.to_openai("claude-sonnet-4-20250514"),
-            "gpt-4-turbo".to_string()
-        );
-        assert_eq!(
-            mapping.to_openai("claude-3-haiku-20240307"),
-            "gpt-3.5-turbo".to_string()
+            mapping.to_target("claude-haiku-4-5-20251001"),
+            "exact-target"
         );
     }
 

@@ -292,14 +292,23 @@ impl TranslationPipeline {
             enabled: true,
         };
 
-        // Register OpenAI ↔ Anthropic translators
+        // Register bidirectional OpenAI ↔ Anthropic translators
         let model_mapping = ModelMapping::from_config(&config.model_mapping);
 
+        // Direction 1: OpenAI clients → Anthropic backend
         pipeline.register_request_translator(openai::OpenAiToAnthropicRequest::new(
             model_mapping.clone(),
         ));
+        pipeline.register_response_translator(openai::AnthropicToOpenAiResponse::new(
+            model_mapping.clone(),
+        ));
+
+        // Direction 2: Anthropic clients (Claude Code) → OpenAI backend
+        pipeline.register_request_translator(openai::AnthropicToOpenAiRequest::new(
+            model_mapping.clone(),
+        ));
         pipeline
-            .register_response_translator(openai::AnthropicToOpenAiResponse::new(model_mapping));
+            .register_response_translator(openai::OpenAiToAnthropicResponse::new(model_mapping));
 
         tracing::info!(
             "Translation pipeline enabled: {} request translator(s), {} response translator(s)",
