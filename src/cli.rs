@@ -51,6 +51,17 @@ pub enum Commands {
         #[arg(long)]
         init: bool,
     },
+
+    /// Manage semantic search embeddings
+    Embeddings {
+        /// Show embedding status and index progress
+        #[arg(long)]
+        status: bool,
+
+        /// Force re-index all documents (clears existing embeddings)
+        #[arg(long)]
+        reindex: bool,
+    },
 }
 
 /// Handle CLI commands. Returns true if a command was handled (exit after).
@@ -89,6 +100,32 @@ pub fn handle_cli() -> bool {
                 println!("  --update  Update config structure (preserves values, shows diff)");
                 println!("  --reset   Reset config file to defaults");
                 println!("  --path    Show config file path");
+            }
+            true
+        }
+        Some(Commands::Embeddings { status, reindex }) => {
+            if status {
+                handle_embeddings_status();
+            } else if reindex {
+                handle_embeddings_reindex();
+            } else {
+                // No flag provided, show help
+                println!("Usage: aspy embeddings [OPTIONS]");
+                println!();
+                println!("Manage semantic search embeddings for context recovery.");
+                println!();
+                println!("Options:");
+                println!("  --status    Show embedding provider status and index progress");
+                println!("  --reindex   Force re-index all documents (clears existing embeddings)");
+                println!();
+                println!("Configuration:");
+                println!("  Embeddings are configured in ~/.config/aspy/config.toml:");
+                println!();
+                println!("  [embeddings]");
+                println!("  provider = \"local\"  # Options: none, local, openai");
+                println!("  model = \"all-MiniLM-L6-v2\"");
+                println!();
+                println!("Note: Local embeddings require building with --features local-embeddings");
             }
             true
         }
@@ -506,5 +543,155 @@ fn prompt_bool(question: &str, default: bool) -> bool {
         default
     } else {
         input == "y" || input == "yes"
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Embeddings Commands
+// ═══════════════════════════════════════════════════════════════════════════
+
+fn handle_embeddings_status() {
+    use crate::pipeline::lifestats_query::LifestatsQuery;
+
+    let config = Config::from_env();
+    let db_path = config.log_dir.join("lifestats.db");
+
+    if !db_path.exists() {
+        println!("Embeddings Status");
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!();
+        println!("  Database: Not found");
+        println!("  Path: {}", db_path.display());
+        println!();
+        println!("  The lifestats database does not exist yet.");
+        println!("  Run aspy normally to start collecting data.");
+        return;
+    }
+
+    match LifestatsQuery::new(&db_path) {
+        Ok(query) => {
+            match query.embedding_stats() {
+                Ok(stats) => {
+                    println!("Embeddings Status");
+                    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    println!();
+                    println!("  Provider:   {}", if stats.provider == "none" { "disabled".to_string() } else { stats.provider.clone() });
+                    if stats.provider != "none" {
+                        println!("  Model:      {}", stats.model);
+                        println!("  Dimensions: {}", stats.dimensions);
+                    }
+                    println!();
+                    println!("  Index Progress");
+                    println!("  ──────────────────────────────────────────────────────────────────────────");
+                    println!(
+                        "  Thinking:   {}/{} ({:.1}%)",
+                        stats.thinking_embedded,
+                        stats.thinking_total,
+                        if stats.thinking_total > 0 {
+                            (stats.thinking_embedded as f64 / stats.thinking_total as f64) * 100.0
+                        } else {
+                            100.0
+                        }
+                    );
+                    println!(
+                        "  Prompts:    {}/{} ({:.1}%)",
+                        stats.prompts_embedded,
+                        stats.prompts_total,
+                        if stats.prompts_total > 0 {
+                            (stats.prompts_embedded as f64 / stats.prompts_total as f64) * 100.0
+                        } else {
+                            100.0
+                        }
+                    );
+                    println!(
+                        "  Responses:  {}/{} ({:.1}%)",
+                        stats.responses_embedded,
+                        stats.responses_total,
+                        if stats.responses_total > 0 {
+                            (stats.responses_embedded as f64 / stats.responses_total as f64) * 100.0
+                        } else {
+                            100.0
+                        }
+                    );
+                    println!("  ──────────────────────────────────────────────────────────────────────────");
+                    println!(
+                        "  Total:      {}/{} ({:.1}%)",
+                        stats.total_embedded, stats.total_documents, stats.progress_pct
+                    );
+                    println!();
+
+                    if stats.provider == "none" {
+                        println!("  To enable embeddings, add to ~/.config/aspy/config.toml:");
+                        println!();
+                        println!("    [embeddings]");
+                        println!("    provider = \"local\"");
+                        println!("    model = \"all-MiniLM-L6-v2\"");
+                        println!();
+                        println!("  Then rebuild with: cargo build --release --features local-embeddings");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error reading embedding stats: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("Error opening database: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn handle_embeddings_reindex() {
+    use rusqlite::Connection;
+
+    let config = Config::from_env();
+    let db_path = config.log_dir.join("lifestats.db");
+
+    if !db_path.exists() {
+        eprintln!("Error: Database not found at {}", db_path.display());
+        eprintln!("Run aspy normally first to create the database.");
+        std::process::exit(1);
+    }
+
+    // Confirm before clearing
+    eprint!(
+        "This will clear all existing embeddings and re-index from scratch.\nContinue? [y/N] "
+    );
+    std::io::stderr().flush().unwrap();
+
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input).unwrap();
+
+    if !input.trim().eq_ignore_ascii_case("y") {
+        println!("Aborted.");
+        return;
+    }
+
+    // Open database and clear embeddings
+    match Connection::open(&db_path) {
+        Ok(conn) => {
+            println!("Clearing existing embeddings...");
+
+            if let Err(e) = conn.execute("DELETE FROM thinking_embeddings", []) {
+                eprintln!("Error clearing thinking_embeddings: {}", e);
+            }
+            if let Err(e) = conn.execute("DELETE FROM prompts_embeddings", []) {
+                eprintln!("Error clearing prompts_embeddings: {}", e);
+            }
+            if let Err(e) = conn.execute("DELETE FROM responses_embeddings", []) {
+                eprintln!("Error clearing responses_embeddings: {}", e);
+            }
+
+            println!("✓ Embeddings cleared.");
+            println!();
+            println!("Re-indexing will begin automatically when you start aspy.");
+            println!("Progress will be shown in the TUI status bar.");
+        }
+        Err(e) => {
+            eprintln!("Error opening database: {}", e);
+            std::process::exit(1);
+        }
     }
 }

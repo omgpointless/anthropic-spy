@@ -1009,4 +1009,460 @@ impl LifestatsQuery {
             by_tool,
         })
     }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Semantic Search (Vector Similarity)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// Search thinking blocks using semantic similarity
+    ///
+    /// Requires embeddings to be enabled and indexed. Falls back to FTS if
+    /// embeddings are not available.
+    ///
+    /// # Arguments
+    /// * `query_embedding` - Pre-computed embedding for the search query
+    /// * `limit` - Maximum number of results
+    ///
+    /// # Returns
+    /// Results sorted by cosine similarity (higher = more relevant)
+    pub fn search_thinking_semantic(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+    ) -> anyhow::Result<Vec<ThinkingMatch>> {
+        use super::embedding_indexer::{blob_to_embedding, cosine_similarity};
+
+        let conn = self.conn()?;
+
+        // Fetch all embedded thinking blocks
+        let sql = r#"
+            SELECT
+                t.id,
+                t.session_id,
+                t.timestamp,
+                t.content,
+                t.tokens,
+                e.embedding
+            FROM thinking_blocks t
+            JOIN thinking_embeddings e ON t.id = e.content_id
+        "#;
+
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let session_id: Option<String> = row.get(1)?;
+            let timestamp: String = row.get(2)?;
+            let content: String = row.get(3)?;
+            let tokens: Option<u32> = row.get(4)?;
+            let embedding_blob: Vec<u8> = row.get(5)?;
+            Ok((id, session_id, timestamp, content, tokens, embedding_blob))
+        })?;
+
+        // Compute similarities and sort
+        let mut results: Vec<(f32, ThinkingMatch)> = Vec::new();
+        for row in rows {
+            let (_, session_id, timestamp, content, tokens, embedding_blob) = row?;
+            let doc_embedding = blob_to_embedding(&embedding_blob);
+            let similarity = cosine_similarity(query_embedding, &doc_embedding);
+
+            results.push((
+                similarity,
+                ThinkingMatch {
+                    session_id,
+                    timestamp,
+                    content,
+                    tokens,
+                    rank: -similarity as f64, // Convert to rank (lower = better for consistency)
+                },
+            ));
+        }
+
+        // Sort by similarity descending
+        results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Take top results
+        let matches: Vec<ThinkingMatch> = results
+            .into_iter()
+            .take(limit)
+            .map(|(_, m)| m)
+            .collect();
+
+        Ok(matches)
+    }
+
+    /// Search user prompts using semantic similarity
+    pub fn search_prompts_semantic(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+    ) -> anyhow::Result<Vec<PromptMatch>> {
+        use super::embedding_indexer::{blob_to_embedding, cosine_similarity};
+
+        let conn = self.conn()?;
+
+        let sql = r#"
+            SELECT
+                p.id,
+                p.session_id,
+                p.timestamp,
+                p.content,
+                e.embedding
+            FROM user_prompts p
+            JOIN prompts_embeddings e ON p.id = e.content_id
+        "#;
+
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let session_id: Option<String> = row.get(1)?;
+            let timestamp: String = row.get(2)?;
+            let content: String = row.get(3)?;
+            let embedding_blob: Vec<u8> = row.get(4)?;
+            Ok((id, session_id, timestamp, content, embedding_blob))
+        })?;
+
+        let mut results: Vec<(f32, PromptMatch)> = Vec::new();
+        for row in rows {
+            let (_, session_id, timestamp, content, embedding_blob) = row?;
+            let doc_embedding = blob_to_embedding(&embedding_blob);
+            let similarity = cosine_similarity(query_embedding, &doc_embedding);
+
+            results.push((
+                similarity,
+                PromptMatch {
+                    session_id,
+                    timestamp,
+                    content,
+                    rank: -similarity as f64,
+                },
+            ));
+        }
+
+        results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        Ok(results.into_iter().take(limit).map(|(_, m)| m).collect())
+    }
+
+    /// Search assistant responses using semantic similarity
+    pub fn search_responses_semantic(
+        &self,
+        query_embedding: &[f32],
+        limit: usize,
+    ) -> anyhow::Result<Vec<ResponseMatch>> {
+        use super::embedding_indexer::{blob_to_embedding, cosine_similarity};
+
+        let conn = self.conn()?;
+
+        let sql = r#"
+            SELECT
+                r.id,
+                r.session_id,
+                r.timestamp,
+                r.content,
+                e.embedding
+            FROM assistant_responses r
+            JOIN responses_embeddings e ON r.id = e.content_id
+        "#;
+
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map([], |row| {
+            let id: i64 = row.get(0)?;
+            let session_id: Option<String> = row.get(1)?;
+            let timestamp: String = row.get(2)?;
+            let content: String = row.get(3)?;
+            let embedding_blob: Vec<u8> = row.get(4)?;
+            Ok((id, session_id, timestamp, content, embedding_blob))
+        })?;
+
+        let mut results: Vec<(f32, ResponseMatch)> = Vec::new();
+        for row in rows {
+            let (_, session_id, timestamp, content, embedding_blob) = row?;
+            let doc_embedding = blob_to_embedding(&embedding_blob);
+            let similarity = cosine_similarity(query_embedding, &doc_embedding);
+
+            results.push((
+                similarity,
+                ResponseMatch {
+                    session_id,
+                    timestamp,
+                    content,
+                    rank: -similarity as f64,
+                },
+            ));
+        }
+
+        results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        Ok(results.into_iter().take(limit).map(|(_, m)| m).collect())
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Hybrid Search (FTS + Vector via Reciprocal Rank Fusion)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// Combined context recovery using hybrid search
+    ///
+    /// Combines FTS5 keyword search with semantic vector search using
+    /// Reciprocal Rank Fusion (RRF). This typically provides better results
+    /// than either method alone.
+    ///
+    /// # Algorithm
+    ///
+    /// For each document, compute:
+    /// `RRF_score = 1/(k + fts_rank) + 1/(k + vec_rank)`
+    ///
+    /// Where k=60 (standard RRF constant). Higher scores indicate better matches.
+    ///
+    /// # Arguments
+    /// * `query` - The text search query
+    /// * `query_embedding` - Optional pre-computed embedding for semantic search
+    /// * `limit` - Maximum total results
+    /// * `mode` - How to interpret the FTS query
+    ///
+    /// # Returns
+    /// Combined results sorted by RRF score (higher = more relevant)
+    pub fn recover_context_hybrid(
+        &self,
+        query: &str,
+        query_embedding: Option<&[f32]>,
+        limit: usize,
+        mode: SearchMode,
+    ) -> anyhow::Result<Vec<ContextMatch>> {
+        const RRF_K: f64 = 60.0;
+
+        // Get FTS results
+        let fts_results = self.recover_context(query, limit * 2, mode)?;
+
+        // If no embedding provided, return FTS results only
+        let query_embedding = match query_embedding {
+            Some(e) => e,
+            None => return Ok(fts_results.into_iter().take(limit).collect()),
+        };
+
+        // Get semantic results
+        let mut semantic_results = Vec::new();
+
+        for m in self.search_thinking_semantic(query_embedding, limit * 2)? {
+            semantic_results.push(ContextMatch {
+                match_type: MatchType::Thinking,
+                session_id: m.session_id,
+                timestamp: m.timestamp,
+                content: m.content,
+                rank: m.rank,
+            });
+        }
+
+        for m in self.search_prompts_semantic(query_embedding, limit * 2)? {
+            semantic_results.push(ContextMatch {
+                match_type: MatchType::UserPrompt,
+                session_id: m.session_id,
+                timestamp: m.timestamp,
+                content: m.content,
+                rank: m.rank,
+            });
+        }
+
+        for m in self.search_responses_semantic(query_embedding, limit * 2)? {
+            semantic_results.push(ContextMatch {
+                match_type: MatchType::AssistantResponse,
+                session_id: m.session_id,
+                timestamp: m.timestamp,
+                content: m.content,
+                rank: m.rank,
+            });
+        }
+
+        // Build document map: (session_id, timestamp, content_hash) -> scores
+        use std::collections::HashMap;
+
+        #[derive(Hash, Eq, PartialEq, Clone)]
+        struct DocKey {
+            session_id: Option<String>,
+            timestamp: String,
+        }
+
+        struct DocScores {
+            fts_rank: Option<usize>,
+            vec_rank: Option<usize>,
+            match_info: ContextMatch,
+        }
+
+        let mut doc_map: HashMap<DocKey, DocScores> = HashMap::new();
+
+        // Add FTS results with rank
+        for (rank, m) in fts_results.iter().enumerate() {
+            let key = DocKey {
+                session_id: m.session_id.clone(),
+                timestamp: m.timestamp.clone(),
+            };
+
+            doc_map.insert(
+                key,
+                DocScores {
+                    fts_rank: Some(rank),
+                    vec_rank: None,
+                    match_info: m.clone(),
+                },
+            );
+        }
+
+        // Add/update semantic results with rank
+        for (rank, m) in semantic_results.iter().enumerate() {
+            let key = DocKey {
+                session_id: m.session_id.clone(),
+                timestamp: m.timestamp.clone(),
+            };
+
+            if let Some(scores) = doc_map.get_mut(&key) {
+                scores.vec_rank = Some(rank);
+            } else {
+                doc_map.insert(
+                    key,
+                    DocScores {
+                        fts_rank: None,
+                        vec_rank: Some(rank),
+                        match_info: m.clone(),
+                    },
+                );
+            }
+        }
+
+        // Compute RRF scores
+        let mut scored_results: Vec<(f64, ContextMatch)> = doc_map
+            .into_values()
+            .map(|scores| {
+                let fts_score = scores
+                    .fts_rank
+                    .map(|r| 1.0 / (RRF_K + r as f64))
+                    .unwrap_or(0.0);
+                let vec_score = scores
+                    .vec_rank
+                    .map(|r| 1.0 / (RRF_K + r as f64))
+                    .unwrap_or(0.0);
+                let rrf_score = fts_score + vec_score;
+
+                // Store negative RRF as rank (lower = better, for API consistency)
+                let mut match_info = scores.match_info;
+                match_info.rank = -rrf_score;
+
+                (rrf_score, match_info)
+            })
+            .collect();
+
+        // Sort by RRF score descending (higher = better)
+        scored_results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Return top results
+        Ok(scored_results
+            .into_iter()
+            .take(limit)
+            .map(|(_, m)| m)
+            .collect())
+    }
+
+    /// Check if embeddings are available for hybrid search
+    pub fn has_embeddings(&self) -> anyhow::Result<bool> {
+        let conn = self.conn()?;
+
+        // Check if embedding_config table exists and has a config
+        let has_config: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM embedding_config WHERE provider != 'none')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !has_config {
+            return Ok(false);
+        }
+
+        // Check if any embeddings exist
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM thinking_embeddings",
+            [],
+            |row| row.get(0),
+        )?;
+
+        Ok(count > 0)
+    }
+
+    /// Get embedding statistics
+    pub fn embedding_stats(&self) -> anyhow::Result<EmbeddingStats> {
+        let conn = self.conn()?;
+
+        // Get config
+        let config: Option<(String, String, i64)> = conn
+            .query_row(
+                "SELECT provider, model, dimensions FROM embedding_config WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .ok();
+
+        let (provider, model, dimensions) = config.unwrap_or_else(|| {
+            ("none".to_string(), "".to_string(), 0)
+        });
+
+        // Count embeddings
+        let thinking_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM thinking_embeddings", [], |row| {
+                row.get(0)
+            })?;
+        let prompts_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM prompts_embeddings", [], |row| {
+                row.get(0)
+            })?;
+        let responses_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM responses_embeddings", [], |row| {
+                row.get(0)
+            })?;
+
+        // Count total content
+        let thinking_total: i64 =
+            conn.query_row("SELECT COUNT(*) FROM thinking_blocks", [], |row| row.get(0))?;
+        let prompts_total: i64 =
+            conn.query_row("SELECT COUNT(*) FROM user_prompts", [], |row| row.get(0))?;
+        let responses_total: i64 =
+            conn.query_row("SELECT COUNT(*) FROM assistant_responses", [], |row| row.get(0))?;
+
+        let embedded = thinking_count + prompts_count + responses_count;
+        let total = thinking_total + prompts_total + responses_total;
+
+        Ok(EmbeddingStats {
+            provider,
+            model,
+            dimensions: dimensions as usize,
+            thinking_embedded: thinking_count as u64,
+            thinking_total: thinking_total as u64,
+            prompts_embedded: prompts_count as u64,
+            prompts_total: prompts_total as u64,
+            responses_embedded: responses_count as u64,
+            responses_total: responses_total as u64,
+            total_embedded: embedded as u64,
+            total_documents: total as u64,
+            progress_pct: if total > 0 {
+                (embedded as f64 / total as f64) * 100.0
+            } else {
+                100.0
+            },
+        })
+    }
+}
+
+/// Embedding statistics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingStats {
+    pub provider: String,
+    pub model: String,
+    pub dimensions: usize,
+    pub thinking_embedded: u64,
+    pub thinking_total: u64,
+    pub prompts_embedded: u64,
+    pub prompts_total: u64,
+    pub responses_embedded: u64,
+    pub responses_total: u64,
+    pub total_embedded: u64,
+    pub total_documents: u64,
+    pub progress_pct: f64,
 }

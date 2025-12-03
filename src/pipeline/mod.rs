@@ -21,6 +21,8 @@ use crate::events::ProxyEvent;
 use std::borrow::Cow;
 use std::sync::Arc;
 
+pub mod embedding_indexer;
+pub mod embeddings;
 pub mod lifestats;
 pub mod lifestats_query;
 pub mod logging;

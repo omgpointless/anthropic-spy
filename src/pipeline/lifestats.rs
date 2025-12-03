@@ -423,6 +423,9 @@ impl LifestatsProcessor {
         if current_version < 3 {
             Self::migrate_v2_to_v3(conn)?;
         }
+        if current_version < 4 {
+            Self::migrate_v3_to_v4(conn)?;
+        }
 
         Ok(())
     }
@@ -634,6 +637,85 @@ impl LifestatsProcessor {
         Ok(())
     }
 
+    /// Migration from v3 to v4 (adds embedding tables for semantic search)
+    ///
+    /// Creates tables to store document embeddings alongside FTS indexes.
+    /// Embeddings are stored as BLOBs (f32 arrays) and can be used for
+    /// vector similarity search to complement FTS5 keyword search.
+    ///
+    /// # Schema Design
+    ///
+    /// Each content table (thinking_blocks, user_prompts, assistant_responses)
+    /// gets a corresponding embedding table:
+    /// - thinking_embeddings
+    /// - prompts_embeddings
+    /// - responses_embeddings
+    ///
+    /// Plus a metadata table for tracking embedding configuration:
+    /// - embedding_config (provider, model, dimensions)
+    fn migrate_v3_to_v4(conn: &Connection) -> anyhow::Result<()> {
+        // Check if embedding tables already exist (idempotent)
+        let has_table: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='thinking_embeddings'",
+            [],
+            |row| row.get(0),
+        )?;
+
+        if !has_table {
+            conn.execute_batch(
+                r#"
+                -- Embedding configuration (tracks provider, model, dimensions)
+                -- If these change, all embeddings need to be re-indexed
+                CREATE TABLE IF NOT EXISTS embedding_config (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),  -- Singleton row
+                    provider TEXT NOT NULL,                  -- 'none', 'local', 'openai', 'azure'
+                    model TEXT NOT NULL,                     -- Model identifier
+                    dimensions INTEGER NOT NULL,             -- Vector dimensions (e.g., 384, 1536)
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                -- Thinking block embeddings
+                -- One-to-one with thinking_blocks, indexed by content_id
+                CREATE TABLE IF NOT EXISTS thinking_embeddings (
+                    content_id INTEGER PRIMARY KEY,
+                    embedding BLOB NOT NULL,                 -- f32 array as bytes
+                    embedded_at TEXT NOT NULL,
+                    FOREIGN KEY (content_id) REFERENCES thinking_blocks(id) ON DELETE CASCADE
+                );
+
+                -- User prompt embeddings
+                CREATE TABLE IF NOT EXISTS prompts_embeddings (
+                    content_id INTEGER PRIMARY KEY,
+                    embedding BLOB NOT NULL,
+                    embedded_at TEXT NOT NULL,
+                    FOREIGN KEY (content_id) REFERENCES user_prompts(id) ON DELETE CASCADE
+                );
+
+                -- Assistant response embeddings
+                CREATE TABLE IF NOT EXISTS responses_embeddings (
+                    content_id INTEGER PRIMARY KEY,
+                    embedding BLOB NOT NULL,
+                    embedded_at TEXT NOT NULL,
+                    FOREIGN KEY (content_id) REFERENCES assistant_responses(id) ON DELETE CASCADE
+                );
+
+                -- Index for finding un-embedded content (for background indexer)
+                -- Note: These are partial indexes - only useful for finding rows WITHOUT embeddings
+                -- SQLite doesn't support partial indexes, so we use LEFT JOIN in queries instead
+                "#,
+            )?;
+        }
+
+        conn.execute(
+            "UPDATE metadata SET value = '4' WHERE key = 'schema_version'",
+            [],
+        )?;
+
+        tracing::info!("Migrated lifestats database from v3 to v4 (added embedding tables)");
+        Ok(())
+    }
+
     /// Retention cleanup - deletes old data and syncs FTS indexes
     ///
     /// # FTS External Content Sync Contract
@@ -706,7 +788,37 @@ impl LifestatsProcessor {
             responses_fts_deleted
         );
 
-        // 4. Now delete from base tables (order matters for FK relationships)
+        // 4. Delete from embedding tables BEFORE base tables
+        //    (FK cascade is disabled, so we delete explicitly)
+        conn.execute(
+            r#"
+            DELETE FROM thinking_embeddings
+            WHERE content_id IN (
+                SELECT id FROM thinking_blocks WHERE timestamp < ?1
+            )
+            "#,
+            params![cutoff_str],
+        )?;
+        conn.execute(
+            r#"
+            DELETE FROM prompts_embeddings
+            WHERE content_id IN (
+                SELECT id FROM user_prompts WHERE timestamp < ?1
+            )
+            "#,
+            params![cutoff_str],
+        )?;
+        conn.execute(
+            r#"
+            DELETE FROM responses_embeddings
+            WHERE content_id IN (
+                SELECT id FROM assistant_responses WHERE timestamp < ?1
+            )
+            "#,
+            params![cutoff_str],
+        )?;
+
+        // 5. Now delete from base tables (order matters for FK relationships)
         deleted += conn.execute(
             "DELETE FROM thinking_blocks WHERE timestamp < ?1",
             params![cutoff_str],
@@ -737,7 +849,7 @@ impl LifestatsProcessor {
             params![cutoff_str],
         )? as u64;
 
-        // 4. Clean up orphaned sessions (no recent activity)
+        // 6. Clean up orphaned sessions (no recent activity)
         deleted += conn.execute(
             "DELETE FROM sessions WHERE started_at < ?1 AND ended_at IS NOT NULL",
             params![cutoff_str],

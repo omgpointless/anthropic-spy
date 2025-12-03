@@ -50,6 +50,9 @@ rusqlite = { version = "0.31", features = ["bundled"] }         # SQLite with FT
 r2d2 = "0.8"                                                    # Connection pooling
 r2d2_sqlite = "0.24"                                            # SQLite connection manager for r2d2
 
+# Embeddings - Local ONNX models for semantic search (opt-in feature)
+fastembed = { version = "4", optional = true }                  # ONNX-based embeddings
+
 # CLI argument parsing
 clap = { version = "4", features = ["derive"] }                 # Command-line argument parser
 
@@ -61,6 +64,11 @@ unicode-width = "0.2"                                           # Correct width 
 
 # Clipboard access
 arboard = "3"                                                   # Cross-platform clipboard (Windows/macOS/Linux)
+
+[features]
+default = []
+# Enable local embeddings using ONNX models (adds ~100MB to binary due to model download)
+local-embeddings = ["fastembed"]
 
 [[bin]]
 name = "aspy"
