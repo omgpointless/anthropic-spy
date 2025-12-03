@@ -135,11 +135,13 @@ impl EventsPanel {
                 if line.len() > content_width {
                     // Account for emoji width (can be 2 columns) - conservative estimate
                     let truncate_at = content_width.saturating_sub(2);
-                    line.truncate(truncate_at);
-                    // Find last char boundary to avoid cutting unicode
-                    while !line.is_char_boundary(line.len()) && !line.is_empty() {
-                        line.pop();
-                    }
+                    // Find the last valid char boundary at or before truncate_at
+                    // This prevents panic from truncating mid-character (e.g., in emojis)
+                    let safe_truncate = (0..=truncate_at.min(line.len()))
+                        .rev()
+                        .find(|&i| line.is_char_boundary(i))
+                        .unwrap_or(0);
+                    line.truncate(safe_truncate);
                     line.push('…');
                 }
 
