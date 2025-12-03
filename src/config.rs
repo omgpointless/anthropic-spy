@@ -365,6 +365,64 @@ impl Config {
         }
     }
 
+    /// Serialize clients HashMap to TOML sections
+    fn clients_to_toml(&self) -> String {
+        if self.clients.clients.is_empty() {
+            // Show example comments when no clients configured
+            return r#"
+# [clients.dev-1]
+# name = "Dev Laptop"
+# provider = "anthropic"       # References [providers.anthropic] below
+"#
+            .to_string();
+        }
+
+        let mut output = String::from("\n");
+        // Sort keys for deterministic output
+        let mut keys: Vec<_> = self.clients.clients.keys().collect();
+        keys.sort();
+
+        for client_id in keys {
+            let client = &self.clients.clients[client_id];
+            output.push_str(&format!("[clients.{}]\n", client_id));
+            output.push_str(&format!("name = \"{}\"\n", client.name));
+            output.push_str(&format!("provider = \"{}\"\n", client.provider));
+            if !client.tags.is_empty() {
+                output.push_str(&format!("tags = {:?}\n", client.tags));
+            }
+            output.push('\n');
+        }
+        output
+    }
+
+    /// Serialize providers HashMap to TOML sections
+    fn providers_to_toml(&self) -> String {
+        if self.clients.providers.is_empty() {
+            // Show example comments when no providers configured
+            return r#"
+# [providers.anthropic]
+# base_url = "https://api.anthropic.com"
+"#
+            .to_string();
+        }
+
+        let mut output = String::from("\n");
+        // Sort keys for deterministic output
+        let mut keys: Vec<_> = self.clients.providers.keys().collect();
+        keys.sort();
+
+        for provider_id in keys {
+            let provider = &self.clients.providers[provider_id];
+            output.push_str(&format!("[providers.{}]\n", provider_id));
+            output.push_str(&format!("base_url = \"{}\"\n", provider.base_url));
+            if let Some(name) = &provider.name {
+                output.push_str(&format!("name = \"{}\"\n", name));
+            }
+            output.push('\n');
+        }
+        output
+    }
+
     /// Serialize config to TOML string (single source of truth for format)
     pub fn to_toml(&self) -> String {
         format!(
@@ -423,32 +481,12 @@ flush_interval_secs = {lifestats_flush_interval_secs}
 # Each client connects via URL path: http://localhost:8080/<client-id>
 #
 # Example: ANTHROPIC_BASE_URL=http://127.0.0.1:8080/dev-1 claude
-
-# [clients.dev-1]
-# name = "Dev Laptop"
-# provider = "anthropic"       # References [providers.anthropic] below
-
-# [clients.work]
-# name = "Work Projects"
-# provider = "anthropic"
-
-# [clients.foundry]
-# name = "Foundry Testing"
-# provider = "aws-foundry"     # Route to a different backend
-
+{clients_section}
 # ─────────────────────────────────────────────────────────────────────────────
 # PROVIDER BACKENDS (Optional)
 # ─────────────────────────────────────────────────────────────────────────────
 # Define where to forward API requests. Clients reference these by name.
-
-# [providers.anthropic]
-# base_url = "https://api.anthropic.com"
-
-# [providers.aws-foundry]
-# base_url = "https://bedrock-runtime.us-east-1.amazonaws.com"
-
-# [providers.local]
-# base_url = "http://localhost:11434"   # For local LLM testing
+{providers_section}
 "#,
             theme = self.theme,
             use_bg = self.use_theme_background,
@@ -471,6 +509,8 @@ flush_interval_secs = {lifestats_flush_interval_secs}
             lifestats_channel_buffer = self.lifestats.channel_buffer,
             lifestats_batch_size = self.lifestats.batch_size,
             lifestats_flush_interval_secs = self.lifestats.flush_interval_secs,
+            clients_section = self.clients_to_toml(),
+            providers_section = self.providers_to_toml(),
         )
     }
 
