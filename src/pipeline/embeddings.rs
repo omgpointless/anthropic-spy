@@ -125,10 +125,8 @@ pub enum ProviderType {
     None,
     /// Local ONNX model (fastembed-rs)
     Local,
-    /// OpenAI API
-    OpenAi,
-    /// Azure OpenAI
-    Azure,
+    /// Remote OpenAI-compatible API (OpenAI, Azure v1, OpenRouter, etc.)
+    Remote,
 }
 
 impl fmt::Display for ProviderType {
@@ -136,10 +134,20 @@ impl fmt::Display for ProviderType {
         match self {
             Self::None => write!(f, "none"),
             Self::Local => write!(f, "local"),
-            Self::OpenAi => write!(f, "openai"),
-            Self::Azure => write!(f, "azure"),
+            Self::Remote => write!(f, "remote"),
         }
     }
+}
+
+/// Authentication method for remote providers
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AuthMethod {
+    /// Bearer token in Authorization header (OpenAI, OpenRouter)
+    #[default]
+    Bearer,
+    /// API key in api-key header (Azure)
+    ApiKey,
 }
 
 /// Configuration for embedding providers
@@ -150,15 +158,25 @@ pub struct EmbeddingConfig {
 
     /// Model name/identifier
     /// - Local: "all-MiniLM-L6-v2", "bge-small-en-v1.5", etc.
-    /// - OpenAI: "text-embedding-3-small", "text-embedding-3-large"
+    /// - Remote: "text-embedding-3-small", "text-embedding-3-large"
     pub model: String,
 
     /// API key (for remote providers)
+    /// Can also be set via environment variables (OPENAI_API_KEY, etc.)
     #[serde(skip_serializing)] // Don't serialize API keys
     pub api_key: Option<String>,
 
-    /// API base URL (for Azure or custom endpoints)
+    /// API base URL for remote providers
+    /// - OpenAI: "https://api.openai.com/v1" (default)
+    /// - Azure v1: "https://{resource}.openai.azure.com/openai/v1"
+    /// - OpenRouter: "https://openrouter.ai/api/v1"
     pub api_base: Option<String>,
+
+    /// Authentication method for remote providers
+    /// - Bearer: Authorization: Bearer {key} (OpenAI, OpenRouter)
+    /// - ApiKey: api-key: {key} (Azure)
+    #[serde(default)]
+    pub auth_method: AuthMethod,
 
     /// Embedding dimensions (auto-detected from model if not specified)
     pub dimensions: Option<usize>,
@@ -177,6 +195,7 @@ impl Default for EmbeddingConfig {
             model: String::new(),
             api_key: None,
             api_base: None,
+            auth_method: AuthMethod::Bearer,
             dimensions: None,
             batch_size: 32,
             timeout_secs: 30,
@@ -198,18 +217,67 @@ impl EmbeddingConfig {
     /// Create config for OpenAI embeddings
     pub fn openai(api_key: impl Into<String>, model: impl Into<String>) -> Self {
         let model = model.into();
-        let dimensions = match model.as_str() {
-            "text-embedding-3-small" | "text-embedding-ada-002" => {
-                Some(dimensions::OPENAI_SMALL)
-            }
-            "text-embedding-3-large" => Some(dimensions::OPENAI_LARGE),
-            _ => None,
-        };
+        let dimensions = Self::infer_dimensions(&model);
 
         Self {
-            provider: ProviderType::OpenAi,
+            provider: ProviderType::Remote,
             model,
             api_key: Some(api_key.into()),
+            api_base: Some("https://api.openai.com/v1".to_string()),
+            auth_method: AuthMethod::Bearer,
+            dimensions,
+            ..Default::default()
+        }
+    }
+
+    /// Create config for Azure AI Foundry v1 API
+    pub fn azure(resource: &str, api_key: impl Into<String>, model: impl Into<String>) -> Self {
+        let model = model.into();
+        let dimensions = Self::infer_dimensions(&model);
+
+        Self {
+            provider: ProviderType::Remote,
+            model,
+            api_key: Some(api_key.into()),
+            api_base: Some(format!("https://{}.openai.azure.com/openai/v1", resource)),
+            auth_method: AuthMethod::ApiKey,
+            dimensions,
+            ..Default::default()
+        }
+    }
+
+    /// Create config for OpenRouter
+    pub fn openrouter(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+        let model = model.into();
+        let dimensions = Self::infer_dimensions(&model);
+
+        Self {
+            provider: ProviderType::Remote,
+            model,
+            api_key: Some(api_key.into()),
+            api_base: Some("https://openrouter.ai/api/v1".to_string()),
+            auth_method: AuthMethod::Bearer,
+            dimensions,
+            ..Default::default()
+        }
+    }
+
+    /// Create config for any OpenAI-compatible endpoint
+    pub fn custom(
+        api_base: impl Into<String>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+        auth_method: AuthMethod,
+    ) -> Self {
+        let model = model.into();
+        let dimensions = Self::infer_dimensions(&model);
+
+        Self {
+            provider: ProviderType::Remote,
+            model,
+            api_key: Some(api_key.into()),
+            api_base: Some(api_base.into()),
+            auth_method,
             dimensions,
             ..Default::default()
         }
@@ -222,19 +290,29 @@ impl EmbeddingConfig {
 
     /// Get the embedding dimensions for this config
     pub fn get_dimensions(&self) -> usize {
-        self.dimensions.unwrap_or_else(|| {
-            // Infer from model name
-            match self.model.as_str() {
-                m if m.contains("MiniLM-L6") => dimensions::MINILM_L6,
-                m if m.contains("MiniLM-L12") => dimensions::MINILM_L12,
-                m if m.contains("bge-small") => dimensions::BGE_SMALL,
-                m if m.contains("bge-base") => dimensions::BGE_BASE,
-                m if m.contains("embedding-3-small") => dimensions::OPENAI_SMALL,
-                m if m.contains("embedding-3-large") => dimensions::OPENAI_LARGE,
-                m if m.contains("ada-002") => dimensions::OPENAI_ADA,
-                _ => dimensions::MINILM_L6, // Safe default
-            }
-        })
+        self.dimensions
+            .unwrap_or_else(|| Self::infer_dimensions(&self.model).unwrap_or(dimensions::MINILM_L6))
+    }
+
+    /// Infer dimensions from model name
+    fn infer_dimensions(model: &str) -> Option<usize> {
+        match model {
+            m if m.contains("MiniLM-L6") => Some(dimensions::MINILM_L6),
+            m if m.contains("MiniLM-L12") => Some(dimensions::MINILM_L12),
+            m if m.contains("bge-small") => Some(dimensions::BGE_SMALL),
+            m if m.contains("bge-base") => Some(dimensions::BGE_BASE),
+            m if m.contains("embedding-3-small") => Some(dimensions::OPENAI_SMALL),
+            m if m.contains("embedding-3-large") => Some(dimensions::OPENAI_LARGE),
+            m if m.contains("ada-002") => Some(dimensions::OPENAI_ADA),
+            _ => None,
+        }
+    }
+
+    /// Get the effective API base URL
+    pub fn get_api_base(&self) -> &str {
+        self.api_base
+            .as_deref()
+            .unwrap_or("https://api.openai.com/v1")
     }
 }
 
@@ -340,6 +418,185 @@ impl EmbeddingProvider for NoOpProvider {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// OpenAI-Compatible Remote Provider
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Remote embedding provider using OpenAI-compatible API
+///
+/// Works with:
+/// - OpenAI (https://api.openai.com/v1)
+/// - Azure AI Foundry v1 (https://{resource}.openai.azure.com/openai/v1)
+/// - OpenRouter (https://openrouter.ai/api/v1)
+/// - Any OpenAI-compatible endpoint
+pub struct OpenAiCompatibleProvider {
+    client: reqwest::blocking::Client,
+    base_url: String,
+    api_key: String,
+    auth_method: AuthMethod,
+    model: String,
+    dimensions: usize,
+}
+
+impl OpenAiCompatibleProvider {
+    /// Create a new OpenAI-compatible embedding provider
+    ///
+    /// # Arguments
+    /// * `config` - Embedding configuration
+    ///
+    /// # Errors
+    /// Returns an error if API key is missing or client creation fails
+    pub fn new(config: &EmbeddingConfig) -> Result<Self, EmbeddingError> {
+        let api_key = config.api_key.clone().ok_or_else(|| {
+            EmbeddingError::NotConfigured
+        })?;
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(config.timeout_secs))
+            .build()
+            .map_err(|e| EmbeddingError::NetworkError(format!("Failed to create HTTP client: {}", e)))?;
+
+        let base_url = config.get_api_base().to_string();
+        let dimensions = config.get_dimensions();
+
+        tracing::info!(
+            "Initialized OpenAI-compatible provider: {} (model: {}, {} dims, auth: {:?})",
+            base_url,
+            config.model,
+            dimensions,
+            config.auth_method
+        );
+
+        Ok(Self {
+            client,
+            base_url,
+            api_key,
+            auth_method: config.auth_method.clone(),
+            model: config.model.clone(),
+            dimensions,
+        })
+    }
+
+    /// Build the embeddings request
+    fn build_request(&self, input: &[&str]) -> reqwest::blocking::RequestBuilder {
+        let url = format!("{}/embeddings", self.base_url.trim_end_matches('/'));
+
+        let mut req = self.client.post(&url);
+
+        // Set auth header based on method
+        req = match &self.auth_method {
+            AuthMethod::Bearer => req.header("Authorization", format!("Bearer {}", self.api_key)),
+            AuthMethod::ApiKey => req.header("api-key", &self.api_key),
+        };
+
+        req.header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "model": self.model,
+                "input": input,
+            }))
+    }
+
+    /// Parse the embeddings response
+    fn parse_response(&self, response: reqwest::blocking::Response) -> Result<BatchEmbeddingResult, EmbeddingError> {
+        let status = response.status();
+
+        if !status.is_success() {
+            let status_code = status.as_u16();
+
+            // Try to parse error body
+            let error_text = response.text().unwrap_or_else(|_| "Unknown error".to_string());
+
+            // Check for rate limiting
+            if status_code == 429 {
+                return Err(EmbeddingError::RateLimited { retry_after_secs: None });
+            }
+
+            return Err(EmbeddingError::ApiError {
+                status: status_code,
+                message: error_text,
+            });
+        }
+
+        // Parse successful response
+        let body: OpenAiEmbeddingResponse = response.json().map_err(|e| {
+            EmbeddingError::Internal(format!("Failed to parse response: {}", e))
+        })?;
+
+        // Sort by index and extract embeddings
+        let mut data = body.data;
+        data.sort_by_key(|d| d.index);
+
+        let embeddings = data.into_iter().map(|d| d.embedding).collect();
+        let total_tokens = body.usage.map(|u| u.total_tokens);
+
+        Ok(BatchEmbeddingResult {
+            embeddings,
+            total_tokens,
+        })
+    }
+}
+
+/// OpenAI embeddings API response format
+#[derive(Debug, Deserialize)]
+struct OpenAiEmbeddingResponse {
+    data: Vec<OpenAiEmbeddingData>,
+    usage: Option<OpenAiUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiEmbeddingData {
+    embedding: Vec<f32>,
+    index: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiUsage {
+    total_tokens: u32,
+}
+
+impl EmbeddingProvider for OpenAiCompatibleProvider {
+    fn name(&self) -> &'static str {
+        "openai-compatible"
+    }
+
+    fn dimensions(&self) -> usize {
+        self.dimensions
+    }
+
+    fn is_ready(&self) -> bool {
+        true
+    }
+
+    fn embed(&self, text: &str) -> Result<EmbeddingResult, EmbeddingError> {
+        let result = self.embed_batch(&[text])?;
+
+        if result.embeddings.is_empty() {
+            return Err(EmbeddingError::Internal("No embedding returned".to_string()));
+        }
+
+        Ok(EmbeddingResult {
+            embedding: result.embeddings.into_iter().next().unwrap(),
+            tokens_used: result.total_tokens,
+        })
+    }
+
+    fn embed_batch(&self, texts: &[&str]) -> Result<BatchEmbeddingResult, EmbeddingError> {
+        if texts.is_empty() {
+            return Ok(BatchEmbeddingResult {
+                embeddings: Vec::new(),
+                total_tokens: None,
+            });
+        }
+
+        let request = self.build_request(texts);
+        let response = request.send().map_err(|e| {
+            EmbeddingError::NetworkError(format!("Request failed: {}", e))
+        })?;
+
+        self.parse_response(response)
+    }
+}
+
 /// Create an embedding provider from configuration
 ///
 /// # Arguments
@@ -369,15 +626,14 @@ pub fn create_provider(config: &EmbeddingConfig) -> Box<dyn EmbeddingProvider> {
                 Box::new(NoOpProvider::new())
             }
         }
-        ProviderType::OpenAi => {
-            // TODO: Phase 2 - OpenAiProvider (uses reqwest, no extra deps needed)
-            tracing::warn!("OpenAI embedding provider not yet implemented, using NoOp");
-            Box::new(NoOpProvider::new())
-        }
-        ProviderType::Azure => {
-            // TODO: Phase 2 - AzureProvider
-            tracing::warn!("Azure embedding provider not yet implemented, using NoOp");
-            Box::new(NoOpProvider::new())
+        ProviderType::Remote => {
+            match OpenAiCompatibleProvider::new(config) {
+                Ok(provider) => Box::new(provider),
+                Err(e) => {
+                    tracing::error!("Failed to create remote embedding provider: {}", e);
+                    Box::new(NoOpProvider::new())
+                }
+            }
         }
     }
 }
@@ -562,7 +818,7 @@ mod tests {
     #[test]
     fn test_embedding_config_openai() {
         let config = EmbeddingConfig::openai("sk-test", "text-embedding-3-small");
-        assert_eq!(config.provider, ProviderType::OpenAi);
+        assert_eq!(config.provider, ProviderType::Remote);
         assert_eq!(config.get_dimensions(), dimensions::OPENAI_SMALL);
         assert!(config.is_enabled());
     }
@@ -585,6 +841,6 @@ mod tests {
     fn test_provider_type_display() {
         assert_eq!(ProviderType::None.to_string(), "none");
         assert_eq!(ProviderType::Local.to_string(), "local");
-        assert_eq!(ProviderType::OpenAi.to_string(), "openai");
+        assert_eq!(ProviderType::Remote.to_string(), "remote");
     }
 }
