@@ -22,7 +22,6 @@ use crate::pipeline::{EventPipeline, ProcessContext};
 use crate::{SharedContextState, StreamingThinking};
 use anyhow::{Context, Result};
 use augmentation::{AugmentationContext, AugmentationPipeline, StopReason};
-use translation::{ApiFormat, TranslationPipeline};
 use axum::{
     body::Body,
     extract::State,
@@ -41,6 +40,7 @@ use std::time::Instant;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use translation::{ApiFormat, TranslationPipeline};
 
 /// Maximum request body size (50MB) - prevents DoS via huge uploads
 const MAX_REQUEST_BODY_SIZE: usize = 50 * 1024 * 1024;
@@ -246,7 +246,7 @@ pub async fn start_proxy(
         pipeline: shared.pipeline,
         lifestats_query: shared.lifestats_query,
         embedding_indexer: shared.embedding_indexer,
-        translation
+        translation,
     };
 
     // Build the router - API endpoints + proxy handler
@@ -711,30 +711,20 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
     } = ctx;
 
     // ─────────────────────────────────────────────────────────────────────────
-    // STREAMING RESPONSE TRANSLATION - NOT YET INTEGRATED
+    // STREAMING RESPONSE TRANSLATION
     // ─────────────────────────────────────────────────────────────────────────
     //
-    // The streaming translation infrastructure is fully implemented in
-    // `translation/openai/response.rs` (see `translate_chunk()`, `translate_sse_data()`,
-    // and `finalize()`), but integration here is pending.
+    // If the request was translated (e.g., OpenAI → Anthropic), the streaming
+    // response is translated back (Anthropic → OpenAI) using the translator's
+    // `translate_chunk()` and `finalize()` methods.
     //
-    // To integrate streaming translation:
-    // 1. If `_needs_translation` is true, wrap the chunk processing below
-    // 2. For each chunk, call `translator.translate_chunk(chunk, &mut translation_ctx)`
-    // 3. Forward translated bytes (non-empty results) to client via `tx`
-    // 4. After stream ends, call `translator.finalize(&translation_ctx)` and send result
-    // 5. The translator handles SSE event boundary detection via `line_buffer`
-    //
-    // Challenges for integration:
-    // - Need mutable `TranslationContext` across async chunk boundaries
-    // - Error handling for mid-stream translation failures
-    // - Coordinating with existing augmentation pipeline
-    //
-    // For now, streaming requests from OpenAI-format clients will receive
-    // Anthropic-format SSE (may work if client is lenient, otherwise fails).
-    // Buffered responses (stream: false) are fully translated.
+    // Key design decisions:
+    // - Real-time extraction (tools, thinking, block index) operates on RAW format
+    // - Augmentation injects Anthropic-format SSE, then gets translated
+    // - Translation errors log and skip (graceful degradation)
+    // - Accumulation for post-stream parsing stays RAW for correct event emission
     // ─────────────────────────────────────────────────────────────────────────
-    let _needs_translation = translation_ctx.needs_response_translation();
+    let needs_translation = translation_ctx.needs_response_translation();
     // Create channel for streaming to client
     // Buffer size of 64 provides some cushion without excessive memory use
     let (tx, rx) = mpsc::channel::<Result<Bytes, Infallible>>(64);
@@ -749,6 +739,8 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
     let augmentation = state.augmentation.clone();
     let _sessions = state.sessions.clone();
     let user_id_clone = user_id.clone();
+    let translation_pipeline = state.translation.clone();
+    let mut translation_ctx = translation_ctx;
 
     // Spawn task to stream response while accumulating
     tokio::spawn(async move {
@@ -763,6 +755,14 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
         let mut injected = false;
         // Track model for injection filtering (skip Haiku utility calls)
         let mut response_model = String::new();
+
+        // Get translator reference if translation is needed (OpenAI ↔ Anthropic)
+        let translator = if needs_translation {
+            translation_pipeline
+                .get_response_translator(ApiFormat::Anthropic, translation_ctx.client_format)
+        } else {
+            None
+        };
 
         // Stream chunks to client while accumulating
         while let Some(chunk_result) = byte_stream.next().await {
@@ -844,7 +844,29 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                                             // Run augmentation pipeline
                                             if let Some(injection) = augmentation.process(&aug_ctx)
                                             {
-                                                let _ = tx.send(Ok(Bytes::from(injection))).await;
+                                                // Translate injection if needed (augmentation produces Anthropic SSE)
+                                                let injection_to_send = if let Some(t) = &translator
+                                                {
+                                                    match t.translate_chunk(
+                                                        &injection,
+                                                        &mut translation_ctx,
+                                                    ) {
+                                                        Ok(translated)
+                                                            if !translated.is_empty() =>
+                                                        {
+                                                            Bytes::from(translated)
+                                                        }
+                                                        Ok(_) => Bytes::from(injection), // Empty = shouldn't happen for complete injection
+                                                        Err(e) => {
+                                                            tracing::warn!("Augmentation translation failed: {}", e);
+                                                            Bytes::from(injection)
+                                                            // Fallback to raw
+                                                        }
+                                                    }
+                                                } else {
+                                                    Bytes::from(injection)
+                                                };
+                                                let _ = tx.send(Ok(injection_to_send)).await;
                                                 injected = true;
                                             }
                                         }
@@ -854,10 +876,27 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                         }
                     }
 
-                    // Forward chunk to client immediately
-                    if tx.send(Ok(chunk)).await.is_err() {
-                        // Client disconnected, but continue accumulating for logging
-                        tracing::debug!("Client disconnected during streaming");
+                    // Forward chunk to client (translate if needed)
+                    let chunk_to_send = if let Some(t) = &translator {
+                        match t.translate_chunk(&chunk, &mut translation_ctx) {
+                            Ok(translated) if !translated.is_empty() => {
+                                Some(Bytes::from(translated))
+                            }
+                            Ok(_) => None, // Partial line buffered, nothing to send yet
+                            Err(e) => {
+                                tracing::warn!("Chunk translation failed (skipping): {}", e);
+                                None // Log and skip per error handling strategy
+                            }
+                        }
+                    } else {
+                        Some(chunk)
+                    };
+
+                    if let Some(bytes_to_send) = chunk_to_send {
+                        if tx.send(Ok(bytes_to_send)).await.is_err() {
+                            // Client disconnected, but continue accumulating for logging
+                            tracing::debug!("Client disconnected during streaming");
+                        }
                     }
                 }
                 Err(e) => {
@@ -891,6 +930,14 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                 }
             }
         }
+
+        // Send stream terminator if translation is active (e.g., "data: [DONE]" for OpenAI)
+        if let Some(t) = &translator {
+            if let Some(terminator) = t.finalize(&translation_ctx) {
+                let _ = tx.send(Ok(Bytes::from(terminator))).await;
+            }
+        }
+
         // Process any remaining data in line buffer
         if is_messages_endpoint && !line_buffer.is_empty() {
             if let Some(tool_info) = sse::extract_tool_use(line_buffer.trim()) {
@@ -1080,12 +1127,13 @@ async fn handle_buffered_response(ctx: ResponseContext) -> Result<Response<Body>
     }
 
     // Apply response translation if needed (convert Anthropic response to OpenAI format)
-    let final_response_body = if translation_ctx.needs_response_translation() && status.is_success() {
+    let final_response_body = if translation_ctx.needs_response_translation() && status.is_success()
+    {
         // Get response translator
-        if let Some(translator) = state.translation.get_response_translator(
-            ApiFormat::Anthropic,
-            translation_ctx.client_format,
-        ) {
+        if let Some(translator) = state
+            .translation
+            .get_response_translator(ApiFormat::Anthropic, translation_ctx.client_format)
+        {
             match translator.translate_buffered(&response_body, &translation_ctx) {
                 Ok(translated) => {
                     tracing::debug!(

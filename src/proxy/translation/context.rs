@@ -145,7 +145,6 @@ pub struct TranslationContext {
     // ─────────────────────────────────────────────────────────────────────────
     // Core fields (used by buffered translation - INTEGRATED)
     // ─────────────────────────────────────────────────────────────────────────
-
     /// Original format the client spoke (e.g., OpenAI)
     pub client_format: ApiFormat,
 
@@ -172,7 +171,6 @@ pub struct TranslationContext {
     // proxy/mod.rs does not yet call translate_chunk(). Until then, these
     // fields are unused at runtime (hence #[allow(dead_code)] on the struct).
     // ─────────────────────────────────────────────────────────────────────────
-
     /// Buffer for incomplete SSE lines that span chunk boundaries
     ///
     /// SSE events may be split across TCP chunks. This buffer accumulates

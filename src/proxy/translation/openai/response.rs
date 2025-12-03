@@ -4,13 +4,10 @@
 //!
 //! # Implementation Status
 //!
-//! - **Buffered Translation (INTEGRATED)**: `translate_buffered()` is called from
-//!   `handle_buffered_response()` in `proxy/mod.rs` for non-streaming responses.
+//! - **Buffered Translation**: `translate_buffered()` handles non-streaming responses
+//! - **Streaming Translation**: `translate_chunk()` and `finalize()` handle SSE streams
 //!
-//! - **Streaming Translation (INFRASTRUCTURE READY, NOT INTEGRATED)**: `translate_chunk()`
-//!   and `finalize()` are fully implemented but not yet called from
-//!   `handle_streaming_response()`. The streaming types (`OpenAiStreamChunk`,
-//!   `OpenAiDelta`, etc.) are marked `#[allow(dead_code)]` until integration.
+//! Both modes are fully integrated in `proxy/mod.rs`.
 //!
 //! # Streaming (SSE) Event Mapping
 //!
@@ -27,15 +24,6 @@
 //!
 //! The full response is translated at once, mapping Anthropic's structure
 //! to OpenAI's `ChatCompletion` object. Thinking blocks are filtered out.
-//!
-//! # Integration TODO
-//!
-//! To enable streaming translation, `handle_streaming_response()` needs to:
-//! 1. Check `translation_ctx.needs_response_translation()`
-//! 2. Wrap the response body stream with a translation layer
-//! 3. Call `translate_chunk()` for each incoming chunk
-//! 4. Forward translated bytes (non-empty results) to client
-//! 5. Call `finalize()` after stream ends to emit `data: [DONE]`
 
 use crate::proxy::translation::{
     context::{ModelMapping, TranslationContext},
@@ -75,7 +63,8 @@ impl ResponseTranslator for AnthropicToOpenAiResponse {
         let anthropic_response: AnthropicResponse =
             serde_json::from_slice(body).context("Failed to parse Anthropic response")?;
 
-        let openai_response = convert_buffered_response(&anthropic_response, ctx, &self.model_mapping);
+        let openai_response =
+            convert_buffered_response(&anthropic_response, ctx, &self.model_mapping);
 
         serde_json::to_vec(&openai_response).context("Failed to serialize OpenAI response")
     }
@@ -120,10 +109,10 @@ impl ResponseTranslator for AnthropicToOpenAiResponse {
 }
 
 impl AnthropicToOpenAiResponse {
-    /// Translate a single SSE data payload (streaming translation core logic)
+    /// Translate a single SSE data payload from Anthropic to OpenAI format.
     ///
     /// This method handles the actual event-by-event translation from Anthropic's
-    /// SSE format to OpenAI's format. It's called by `translate_chunk()` for each
+    /// SSE format to OpenAI's format. Called by `translate_chunk()` for each
     /// complete `data: {...}` line.
     ///
     /// # Event Handling
@@ -134,22 +123,16 @@ impl AnthropicToOpenAiResponse {
     /// - `content_block_stop`: Increments chunk_index for tool ordering
     /// - `message_delta`: Captures finish_reason, sends final content chunk
     /// - `message_stop`: No-op (finalize() sends [DONE])
-    ///
-    /// # Integration Status
-    ///
-    /// **NOT YET INTEGRATED**: This method is fully implemented and tested, but
-    /// not called at runtime because `handle_streaming_response()` doesn't invoke
-    /// `translate_chunk()`. See module-level docs for integration requirements.
-    #[allow(dead_code)]
-    fn translate_sse_data(&self, data: &str, ctx: &mut TranslationContext) -> Result<Option<Vec<u8>>> {
+    fn translate_sse_data(
+        &self,
+        data: &str,
+        ctx: &mut TranslationContext,
+    ) -> Result<Option<Vec<u8>>> {
         // Parse the JSON data
         let event: serde_json::Value =
             serde_json::from_str(data).context("Failed to parse SSE data")?;
 
-        let event_type = event
-            .get("type")
-            .and_then(|t| t.as_str())
-            .unwrap_or("");
+        let event_type = event.get("type").and_then(|t| t.as_str()).unwrap_or("");
 
         match event_type {
             "message_start" => {
@@ -231,10 +214,7 @@ impl AnthropicToOpenAiResponse {
 
                     match delta_type {
                         "text_delta" => {
-                            let text = delta
-                                .get("text")
-                                .and_then(|t| t.as_str())
-                                .unwrap_or("");
+                            let text = delta.get("text").and_then(|t| t.as_str()).unwrap_or("");
 
                             if !text.is_empty() {
                                 ctx.accumulated_content.push_str(text);
@@ -465,26 +445,20 @@ struct OpenAiUsage {
 }
 
 // ============================================================================
-// Streaming Types (Infrastructure Ready - NOT YET INTEGRATED)
+// Streaming Types
 // ============================================================================
 //
 // These types support the streaming translation logic in `translate_chunk()`.
-// They are fully implemented and tested, but `handle_streaming_response()` in
-// `proxy/mod.rs` does not yet call the streaming methods.
-//
-// The types mirror OpenAI's streaming format:
+// They mirror OpenAI's streaming format:
 // - Each SSE chunk contains a `ChatCompletionChunk` object
 // - The `delta` field contains incremental content (vs `message` in buffered)
 // - Tool calls stream incrementally with `index` for ordering
-//
-// Once integrated, remove the `#[allow(dead_code)]` attributes.
 // ============================================================================
 
 /// OpenAI streaming chunk format (`chat.completion.chunk`)
 ///
 /// Sent as `data: {...}\n\n` in SSE stream. Each chunk contains partial content.
 #[derive(Debug, Serialize)]
-#[allow(dead_code)]
 struct OpenAiStreamChunk {
     id: String,
     object: String,
@@ -496,7 +470,6 @@ struct OpenAiStreamChunk {
 }
 
 #[derive(Debug, Serialize)]
-#[allow(dead_code)]
 struct OpenAiStreamChoice {
     index: u32,
     delta: OpenAiDelta,
@@ -505,7 +478,6 @@ struct OpenAiStreamChoice {
 }
 
 #[derive(Debug, Serialize)]
-#[allow(dead_code)]
 struct OpenAiDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     role: Option<String>,
@@ -516,7 +488,6 @@ struct OpenAiDelta {
 }
 
 #[derive(Debug, Serialize)]
-#[allow(dead_code)]
 struct OpenAiToolCallDelta {
     index: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -529,7 +500,6 @@ struct OpenAiToolCallDelta {
 }
 
 #[derive(Debug, Serialize)]
-#[allow(dead_code)]
 struct OpenAiFunctionDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
@@ -602,9 +572,7 @@ fn convert_buffered_response(
         choices: vec![OpenAiChoice {
             index: 0,
             message,
-            finish_reason: convert_stop_reason(
-                response.stop_reason.as_deref().unwrap_or("stop"),
-            ),
+            finish_reason: convert_stop_reason(response.stop_reason.as_deref().unwrap_or("stop")),
         }],
         usage: OpenAiUsage {
             prompt_tokens: response.usage.input_tokens,
@@ -638,12 +606,6 @@ fn current_timestamp() -> u64 {
 /// Format a streaming chunk as SSE data line
 ///
 /// Produces `data: {...}\n\n` format expected by OpenAI-compatible clients.
-///
-/// # Integration Status
-///
-/// **NOT YET INTEGRATED**: Used by `translate_sse_data()` which is not yet
-/// called from `handle_streaming_response()`.
-#[allow(dead_code)]
 fn format_sse_chunk(chunk: &OpenAiStreamChunk) -> Result<Vec<u8>> {
     let json = serde_json::to_string(chunk)?;
     Ok(format!("data: {}\n\n", json).into_bytes())

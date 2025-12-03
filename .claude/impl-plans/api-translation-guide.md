@@ -1,6 +1,6 @@
 # API Translation System - Implementation Guide
 
-> **Purpose**: Guide for Claude instances working on the translation system. This captures architectural decisions, patterns, and the roadmap for completing streaming integration.
+> **Purpose**: Guide for Claude instances working on the translation system. This captures architectural decisions, patterns, and integration details.
 
 ## Quick Context
 
@@ -17,12 +17,10 @@ Client Request (OpenAI) → RequestTranslator → [Proxy Core] → ResponseTrans
 
 ## Current State
 
-### Fully Integrated
+### Fully Integrated ✅
 1. **Request translation**: `proxy_handler()` calls `TranslationPipeline::translate_request()`
 2. **Buffered response translation**: `handle_buffered_response()` calls `translator.translate_buffered()`
-
-### Infrastructure Ready, Not Integrated
-- **Streaming response translation**: `translate_chunk()` and `finalize()` are implemented and tested but NOT called from `handle_streaming_response()`
+3. **Streaming response translation**: `handle_streaming_response()` calls `translator.translate_chunk()` and `translator.finalize()`
 
 ## File Map
 
@@ -77,70 +75,27 @@ Preserve `original_model` in context to return the exact model name the client s
 2. **Headers**: Check for format hints
 3. **Body structure** (fallback): Look for `messages[].role` vs `messages[].content[].type`
 
-## Streaming Integration TODO
+## Streaming Integration (COMPLETED ✅)
 
-The remaining work is in `src/proxy/mod.rs` → `handle_streaming_response()`.
+Streaming translation is fully integrated in `src/proxy/mod.rs` → `handle_streaming_response()`.
 
-### What Needs to Change
+### How It Works
 
-Currently, chunks flow:
 ```
-Anthropic SSE → forward to client unchanged
-```
-
-With translation:
-```
-Anthropic SSE → translate_chunk() → forward translated to client
-                                  → finalize() at end
+Anthropic SSE → Real-time extraction (RAW) → Augmentation inject → translate_chunk() → Client
+                (tools, thinking, block idx)  (Anthropic SSE)       (if needed)
+                                                                    → finalize() at end
 ```
 
-### Implementation Steps
+### Key Design Decisions
 
-1. **Check if translation needed** (already done):
-   ```rust
-   let needs_translation = translation_ctx.needs_response_translation();
-   ```
+1. **Real-time extraction operates on RAW format**: Tool registration, thinking streaming, and block index tracking all happen before translation. This preserves internal observability.
 
-2. **Get the response translator**:
-   ```rust
-   let translator = state.translation
-       .get_response_translator(ApiFormat::Anthropic, ApiFormat::OpenAI);
-   ```
+2. **Augmentation happens BEFORE translation**: Augmentors inject Anthropic-format SSE, which then gets translated if needed.
 
-3. **Wrap chunk processing** (the main change):
-   ```rust
-   // Inside the while loop processing chunks:
-   let chunk_to_send = if needs_translation {
-       let translated = translator.translate_chunk(&chunk, &mut translation_ctx)?;
-       if translated.is_empty() {
-           continue; // Chunk buffered, not ready to send
-       }
-       Bytes::from(translated)
-   } else {
-       chunk
-   };
-   ```
+3. **Error handling**: Translation errors log and skip (graceful degradation). A dropped event is better than a broken stream.
 
-4. **Call finalize after stream ends**:
-   ```rust
-   // After the while loop:
-   if needs_translation {
-       if let Some(terminator) = translator.finalize(&translation_ctx) {
-           let _ = tx.send(Ok(Bytes::from(terminator))).await;
-       }
-   }
-   ```
-
-### Challenges to Handle
-
-1. **Mutable context across async boundaries**: The `translation_ctx` needs to be mutable inside the spawned task. Currently it's moved into the task - that's fine, just use `&mut translation_ctx` when calling `translate_chunk()`.
-
-2. **Error handling mid-stream**: If `translate_chunk()` fails, decide whether to:
-   - Drop the stream (client sees incomplete response)
-   - Fall back to raw Anthropic format (may confuse client)
-   - Log and continue (skip problematic chunk)
-
-3. **Coordinating with augmentation**: Augmentation currently injects content into Anthropic SSE. If translating, should augmentation happen BEFORE or AFTER translation? Recommendation: augment first (in Anthropic format), then translate.
+4. **Mutable context in async**: `translation_ctx` is moved into the spawned task and mutated via `&mut` references within the task's sequential execution.
 
 ## Adding a New Format (e.g., Bedrock)
 

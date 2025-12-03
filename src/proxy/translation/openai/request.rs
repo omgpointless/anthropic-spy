@@ -74,23 +74,22 @@ impl RequestTranslator for OpenAiToAnthropicRequest {
             messages: anthropic_messages,
             system,
             max_tokens: openai_request.max_tokens.unwrap_or(4096),
-            temperature: openai_request.temperature.map(|t| (t / 2.0).clamp(0.0, 1.0)),
+            temperature: openai_request
+                .temperature
+                .map(|t| (t / 2.0).clamp(0.0, 1.0)),
             top_p: openai_request.top_p,
             top_k: None,
             stop_sequences: convert_stop_sequences(openai_request.stop),
             stream: openai_request.stream,
-            tools: openai_request.tools.map(|tools| {
-                tools
-                    .into_iter()
-                    .filter_map(convert_tool)
-                    .collect()
-            }),
+            tools: openai_request
+                .tools
+                .map(|tools| tools.into_iter().filter_map(convert_tool).collect()),
             tool_choice: convert_tool_choice(openai_request.tool_choice),
             metadata: None,
         };
 
-        let translated_body =
-            serde_json::to_vec(&anthropic_request).context("Failed to serialize Anthropic request")?;
+        let translated_body = serde_json::to_vec(&anthropic_request)
+            .context("Failed to serialize Anthropic request")?;
 
         // Create translation context
         let ctx = TranslationContext::new(
@@ -422,8 +421,8 @@ fn convert_message(msg: &OpenAiMessage) -> AnthropicMessage {
 
         // Add tool use blocks
         for tool_call in tool_calls {
-            let input: serde_json::Value =
-                serde_json::from_str(&tool_call.function.arguments).unwrap_or(serde_json::json!({}));
+            let input: serde_json::Value = serde_json::from_str(&tool_call.function.arguments)
+                .unwrap_or(serde_json::json!({}));
             blocks.push(AnthropicContentBlock::ToolUse {
                 id: tool_call.id.clone(),
                 name: tool_call.function.name.clone(),
@@ -563,7 +562,9 @@ mod tests {
             ]
         }"#;
 
-        let (translated, ctx) = translator.translate(openai_body.as_bytes(), &headers).unwrap();
+        let (translated, ctx) = translator
+            .translate(openai_body.as_bytes(), &headers)
+            .unwrap();
         let anthropic: serde_json::Value = serde_json::from_slice(&translated).unwrap();
 
         assert_eq!(anthropic["model"], "claude-sonnet-4-20250514");
@@ -585,7 +586,9 @@ mod tests {
             ]
         }"#;
 
-        let (translated, _) = translator.translate(openai_body.as_bytes(), &headers).unwrap();
+        let (translated, _) = translator
+            .translate(openai_body.as_bytes(), &headers)
+            .unwrap();
         let anthropic: serde_json::Value = serde_json::from_slice(&translated).unwrap();
 
         assert_eq!(anthropic["system"], "You are helpful");
@@ -605,7 +608,9 @@ mod tests {
             "temperature": 1.4
         }"#;
 
-        let (translated, _) = translator.translate(openai_body.as_bytes(), &headers).unwrap();
+        let (translated, _) = translator
+            .translate(openai_body.as_bytes(), &headers)
+            .unwrap();
         let anthropic: serde_json::Value = serde_json::from_slice(&translated).unwrap();
 
         // 1.4 / 2 = 0.7
@@ -641,7 +646,9 @@ mod tests {
             ]
         }"#;
 
-        let (translated, _) = translator.translate(openai_body.as_bytes(), &headers).unwrap();
+        let (translated, _) = translator
+            .translate(openai_body.as_bytes(), &headers)
+            .unwrap();
         let anthropic: serde_json::Value = serde_json::from_slice(&translated).unwrap();
 
         // Check assistant message has tool_use block
@@ -671,7 +678,9 @@ mod tests {
             "stream": true
         }"#;
 
-        let (_, ctx) = translator.translate(openai_body.as_bytes(), &headers).unwrap();
+        let (_, ctx) = translator
+            .translate(openai_body.as_bytes(), &headers)
+            .unwrap();
         assert!(ctx.streaming);
     }
 }

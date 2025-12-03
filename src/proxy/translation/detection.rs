@@ -117,7 +117,8 @@ impl FormatDetector {
         // Check for OpenAI-specific headers
         if headers.contains_key("openai-organization")
             || headers.contains_key("openai-project")
-            || headers.get("authorization")
+            || headers
+                .get("authorization")
                 .and_then(|v| v.to_str().ok())
                 .map(|v| v.starts_with("Bearer sk-"))
                 .unwrap_or(false)
@@ -177,13 +178,10 @@ impl FormatDetector {
                         if let Some(blocks) = content.as_array() {
                             // Check for Anthropic-specific content block types
                             for block in blocks {
-                                if let Some(block_type) =
-                                    block.get("type").and_then(|t| t.as_str())
+                                if let Some(block_type) = block.get("type").and_then(|t| t.as_str())
                                 {
-                                    if matches!(
-                                        block_type,
-                                        "tool_use" | "tool_result" | "thinking"
-                                    ) {
+                                    if matches!(block_type, "tool_use" | "tool_result" | "thinking")
+                                    {
                                         return Some(ApiFormat::Anthropic);
                                     }
                                     if block_type == "image_url" {

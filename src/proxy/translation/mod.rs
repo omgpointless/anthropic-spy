@@ -193,11 +193,7 @@ pub trait ResponseTranslator: Send + Sync {
     /// Translate a complete buffered response
     ///
     /// Used for non-streaming (JSON) responses.
-    fn translate_buffered(
-        &self,
-        body: &[u8],
-        ctx: &TranslationContext,
-    ) -> anyhow::Result<Vec<u8>>;
+    fn translate_buffered(&self, body: &[u8], ctx: &TranslationContext) -> anyhow::Result<Vec<u8>>;
 
     /// Translate a single SSE chunk (streaming response translation)
     ///
@@ -302,9 +298,8 @@ impl TranslationPipeline {
         pipeline.register_request_translator(openai::OpenAiToAnthropicRequest::new(
             model_mapping.clone(),
         ));
-        pipeline.register_response_translator(openai::AnthropicToOpenAiResponse::new(
-            model_mapping,
-        ));
+        pipeline
+            .register_response_translator(openai::AnthropicToOpenAiResponse::new(model_mapping));
 
         tracing::info!(
             "Translation pipeline enabled: {} request translator(s), {} response translator(s)",

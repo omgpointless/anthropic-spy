@@ -989,6 +989,15 @@ impl Config {
         };
         features.push(embeddings_def);
 
+        // Translation: optional (API format conversion)
+        features.push(FeatureDefinition::optional(
+            "translation",
+            "translation",
+            FeatureCategory::Pipeline,
+            self.translation.enabled,
+            "API translation",
+        ));
+
         // Routing: configurable (needs client definitions)
         features.push(FeatureDefinition::configurable(
             "routing",
