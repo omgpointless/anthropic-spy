@@ -2,21 +2,40 @@
 //!
 //! Converts Anthropic Messages API responses to OpenAI Chat Completions format.
 //!
-//! # Streaming (SSE) Translation
+//! # Implementation Status
+//!
+//! - **Buffered Translation (INTEGRATED)**: `translate_buffered()` is called from
+//!   `handle_buffered_response()` in `proxy/mod.rs` for non-streaming responses.
+//!
+//! - **Streaming Translation (INFRASTRUCTURE READY, NOT INTEGRATED)**: `translate_chunk()`
+//!   and `finalize()` are fully implemented but not yet called from
+//!   `handle_streaming_response()`. The streaming types (`OpenAiStreamChunk`,
+//!   `OpenAiDelta`, etc.) are marked `#[allow(dead_code)]` until integration.
+//!
+//! # Streaming (SSE) Event Mapping
 //!
 //! | Anthropic Event          | OpenAI Event                              |
 //! |--------------------------|-------------------------------------------|
-//! | `message_start`          | Initial chunk with role                   |
-//! | `content_block_start`    | (accumulated)                             |
-//! | `content_block_delta`    | `choices[].delta.content`                 |
-//! | `content_block_stop`     | (ignored)                                 |
+//! | `message_start`          | Initial chunk with `role: "assistant"`    |
+//! | `content_block_start`    | Tool call header (for tool_use blocks)    |
+//! | `content_block_delta`    | `choices[].delta.content` or tool args    |
+//! | `content_block_stop`     | Increment chunk_index (for tool indexing) |
 //! | `message_delta`          | `choices[].finish_reason`                 |
-//! | `message_stop`           | `data: [DONE]`                            |
+//! | `message_stop`           | (triggers `finalize()` → `data: [DONE]`)  |
 //!
 //! # Buffered (JSON) Translation
 //!
 //! The full response is translated at once, mapping Anthropic's structure
-//! to OpenAI's `ChatCompletion` object.
+//! to OpenAI's `ChatCompletion` object. Thinking blocks are filtered out.
+//!
+//! # Integration TODO
+//!
+//! To enable streaming translation, `handle_streaming_response()` needs to:
+//! 1. Check `translation_ctx.needs_response_translation()`
+//! 2. Wrap the response body stream with a translation layer
+//! 3. Call `translate_chunk()` for each incoming chunk
+//! 4. Forward translated bytes (non-empty results) to client
+//! 5. Call `finalize()` after stream ends to emit `data: [DONE]`
 
 use crate::proxy::translation::{
     context::{ModelMapping, TranslationContext},
@@ -101,9 +120,26 @@ impl ResponseTranslator for AnthropicToOpenAiResponse {
 }
 
 impl AnthropicToOpenAiResponse {
-    /// Translate a single SSE data payload
+    /// Translate a single SSE data payload (streaming translation core logic)
     ///
-    /// Note: This is used by translate_chunk() which is not yet integrated into the proxy.
+    /// This method handles the actual event-by-event translation from Anthropic's
+    /// SSE format to OpenAI's format. It's called by `translate_chunk()` for each
+    /// complete `data: {...}` line.
+    ///
+    /// # Event Handling
+    ///
+    /// - `message_start`: Extracts model, sends initial chunk with role
+    /// - `content_block_start`: Sends tool call header for tool_use blocks
+    /// - `content_block_delta`: Sends text or tool argument increments
+    /// - `content_block_stop`: Increments chunk_index for tool ordering
+    /// - `message_delta`: Captures finish_reason, sends final content chunk
+    /// - `message_stop`: No-op (finalize() sends [DONE])
+    ///
+    /// # Integration Status
+    ///
+    /// **NOT YET INTEGRATED**: This method is fully implemented and tested, but
+    /// not called at runtime because `handle_streaming_response()` doesn't invoke
+    /// `translate_chunk()`. See module-level docs for integration requirements.
     #[allow(dead_code)]
     fn translate_sse_data(&self, data: &str, ctx: &mut TranslationContext) -> Result<Option<Vec<u8>>> {
         // Parse the JSON data
@@ -428,7 +464,25 @@ struct OpenAiUsage {
     total_tokens: u32,
 }
 
-// Streaming types (used by translate_chunk() - not yet integrated)
+// ============================================================================
+// Streaming Types (Infrastructure Ready - NOT YET INTEGRATED)
+// ============================================================================
+//
+// These types support the streaming translation logic in `translate_chunk()`.
+// They are fully implemented and tested, but `handle_streaming_response()` in
+// `proxy/mod.rs` does not yet call the streaming methods.
+//
+// The types mirror OpenAI's streaming format:
+// - Each SSE chunk contains a `ChatCompletionChunk` object
+// - The `delta` field contains incremental content (vs `message` in buffered)
+// - Tool calls stream incrementally with `index` for ordering
+//
+// Once integrated, remove the `#[allow(dead_code)]` attributes.
+// ============================================================================
+
+/// OpenAI streaming chunk format (`chat.completion.chunk`)
+///
+/// Sent as `data: {...}\n\n` in SSE stream. Each chunk contains partial content.
 #[derive(Debug, Serialize)]
 #[allow(dead_code)]
 struct OpenAiStreamChunk {
@@ -581,7 +635,14 @@ fn current_timestamp() -> u64 {
         .unwrap_or(0)
 }
 
-/// Format a chunk as SSE
+/// Format a streaming chunk as SSE data line
+///
+/// Produces `data: {...}\n\n` format expected by OpenAI-compatible clients.
+///
+/// # Integration Status
+///
+/// **NOT YET INTEGRATED**: Used by `translate_sse_data()` which is not yet
+/// called from `handle_streaming_response()`.
 #[allow(dead_code)]
 fn format_sse_chunk(chunk: &OpenAiStreamChunk) -> Result<Vec<u8>> {
     let json = serde_json::to_string(chunk)?;

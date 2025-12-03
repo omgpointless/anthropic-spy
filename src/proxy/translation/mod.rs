@@ -26,6 +26,24 @@
 //! - **EventProcessor**: Transforms ProxyEvents after parsing
 //! - **Translator**: Converts entire HTTP bodies between API formats (this module)
 //!
+//! # Implementation Status
+//!
+//! ## Fully Integrated
+//! - **Request translation**: OpenAI → Anthropic (via `proxy_handler`)
+//! - **Buffered response translation**: Anthropic → OpenAI (via `handle_buffered_response`)
+//!
+//! ## Infrastructure Ready, Not Yet Integrated
+//! - **Streaming response translation**: The `translate_chunk()` and `finalize()` methods
+//!   are fully implemented in `openai/response.rs`, but not yet wired into
+//!   `handle_streaming_response()` in `proxy/mod.rs`. This requires:
+//!   1. Wrapping the SSE stream to intercept chunks before forwarding to client
+//!   2. Calling `translate_chunk()` on each chunk
+//!   3. Calling `finalize()` to emit the `data: [DONE]` terminator
+//!   4. Managing `TranslationContext` state across async chunk boundaries
+//!
+//! The streaming types (`OpenAiStreamChunk`, `OpenAiDelta`, etc.) and chunk
+//! translation logic are complete—only the proxy integration is pending.
+//!
 //! # Adding New Format Support
 //!
 //! 1. Add variant to `ApiFormat` enum
@@ -138,11 +156,30 @@ pub trait RequestTranslator: Send + Sync {
 /// Response translators convert API responses back to the client's expected
 /// format. They support both buffered (JSON) and streaming (SSE) responses.
 ///
-/// # Streaming Design
+/// # Buffered Response Translation (Integrated)
 ///
-/// For SSE responses, `translate_chunk` is called for each chunk. The translator
-/// must handle partial data and chunk boundaries. Use `TranslationContext` to
-/// maintain state across chunks if needed.
+/// For non-streaming responses, `translate_buffered()` converts the complete
+/// JSON response body. This is fully integrated via `handle_buffered_response()`
+/// in `proxy/mod.rs`.
+///
+/// # Streaming Response Translation (Infrastructure Ready)
+///
+/// For SSE responses, `translate_chunk()` is called for each chunk. The translator
+/// handles partial data and chunk boundaries using `TranslationContext` state.
+///
+/// **Current Status**: The streaming translation logic is fully implemented in
+/// `openai/response.rs` (see `translate_chunk()`, `translate_sse_data()`, and
+/// `finalize()`), but integration into `handle_streaming_response()` is pending.
+///
+/// **Why not yet integrated**: Streaming translation requires intercepting SSE
+/// chunks in the forwarding path, which involves wrapping the response body
+/// stream. This adds complexity around:
+/// - Async chunk processing with mutable `TranslationContext`
+/// - Error handling for mid-stream translation failures
+/// - Proper SSE event boundary detection
+///
+/// The buffered path was prioritized for initial implementation as it covers
+/// the `stream: false` use case completely.
 pub trait ResponseTranslator: Send + Sync {
     /// Human-readable name for logging and debugging
     fn name(&self) -> &'static str;
@@ -162,18 +199,35 @@ pub trait ResponseTranslator: Send + Sync {
         ctx: &TranslationContext,
     ) -> anyhow::Result<Vec<u8>>;
 
-    /// Translate a single SSE chunk
+    /// Translate a single SSE chunk (streaming response translation)
     ///
     /// Called for each chunk in a streaming response. The translator should:
-    /// - Parse Anthropic SSE events
+    /// - Parse Anthropic SSE events from the chunk
     /// - Convert to OpenAI SSE format
-    /// - Return empty vec to skip/buffer a chunk
+    /// - Return empty vec to skip/buffer a chunk (e.g., for partial events)
     ///
     /// # Arguments
     /// * `chunk` - Raw chunk bytes (may contain partial SSE events)
-    /// * `ctx` - Translation context (mutable for state tracking)
+    /// * `ctx` - Translation context (mutable for state tracking across chunks)
     ///
-    /// Note: Streaming translation is planned but not yet integrated into the proxy.
+    /// # Implementation Notes
+    ///
+    /// The implementation in `openai/response.rs` handles:
+    /// - Line buffering for chunks that split across SSE event boundaries
+    /// - Event type mapping (message_start → initial role, content_block_delta → content, etc.)
+    /// - Tool call streaming with incremental argument JSON
+    /// - State tracking via `TranslationContext` fields (chunk_index, finish_reason, etc.)
+    ///
+    /// # Integration Status
+    ///
+    /// **NOT YET INTEGRATED**: This method is fully implemented but not called from
+    /// `handle_streaming_response()` in `proxy/mod.rs`. To integrate:
+    /// 1. Wrap the response body stream to intercept chunks
+    /// 2. For each chunk, call `translate_chunk()` with mutable context
+    /// 3. Forward translated bytes to client (or buffer if empty)
+    /// 4. Call `finalize()` after stream ends
+    ///
+    /// See `openai/response.rs` for the complete streaming translation logic.
     #[allow(dead_code)]
     fn translate_chunk(
         &self,
@@ -186,7 +240,11 @@ pub trait ResponseTranslator: Send + Sync {
     /// Called after all chunks have been processed. Returns format-specific
     /// terminator (e.g., `data: [DONE]\n\n` for OpenAI).
     ///
-    /// Note: Streaming translation is planned but not yet integrated into the proxy.
+    /// # Integration Status
+    ///
+    /// **NOT YET INTEGRATED**: Should be called after the last chunk is processed
+    /// in `handle_streaming_response()`. The returned bytes must be sent to the
+    /// client to properly terminate the OpenAI-format SSE stream.
     #[allow(dead_code)]
     fn finalize(&self, ctx: &TranslationContext) -> Option<Vec<u8>>;
 }
