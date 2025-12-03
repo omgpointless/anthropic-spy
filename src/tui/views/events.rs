@@ -373,7 +373,7 @@ pub(crate) fn format_event_detail(event: &ProxyEvent) -> RenderableContent {
             };
 
             RenderableContent::Markdown(format!(
-                "## 📥 HTTP Request\n\n\
+                "## ← HTTP Request\n\n\
                 **ID:** {}  \n\
                 **Timestamp:** {}  \n\
                 **Method:** {}  \n\
@@ -407,7 +407,7 @@ pub(crate) fn format_event_detail(event: &ProxyEvent) -> RenderableContent {
             };
 
             RenderableContent::Markdown(format!(
-                "## 📤 HTTP Response\n\n\
+                "## → HTTP Response\n\n\
                 **Request ID:** {}  \n\
                 **Timestamp:** {}  \n\
                 **Status:** {}  \n\
