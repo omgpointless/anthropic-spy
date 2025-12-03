@@ -250,6 +250,8 @@ async fn main() -> Result<()> {
 
     // Pipeline reference for shutdown (only used in non-demo mode)
     let pipeline_for_shutdown: Option<std::sync::Arc<pipeline::EventPipeline>>;
+    // Embedding indexer reference for shutdown (only used when embeddings enabled)
+    let indexer_for_shutdown: Option<pipeline::embedding_indexer::EmbeddingIndexer>;
 
     let proxy_handle = if config.demo_mode {
         // Demo mode: generate mock events instead of running real proxy
@@ -257,13 +259,16 @@ async fn main() -> Result<()> {
         drop(event_tx_storage);
         tracing::info!("Running in DEMO MODE - generating mock events");
         pipeline_for_shutdown = None;
+        indexer_for_shutdown = None;
         tokio::spawn(async move {
             demo::run_demo(event_tx_tui, shutdown_rx, proxy_streaming_thinking).await;
         })
     } else {
         // Initialize event processing pipeline and query interface
-        let (pipeline, lifestats_query) = if config.lifestats.enabled {
+        let (pipeline, lifestats_query, embedding_indexer) = if config.lifestats.enabled {
             use pipeline::{
+                embedding_indexer::EmbeddingIndexer,
+                embeddings::{self, EmbeddingConfig, ProviderType, AuthMethod},
                 lifestats::LifestatsProcessor, lifestats_query::LifestatsQuery, EventPipeline,
             };
 
@@ -294,9 +299,87 @@ async fn main() -> Result<()> {
                                 "Lifestats initialized (SQLite: {})",
                                 config.lifestats.db_path.display()
                             );
+
+                            // Initialize embedding indexer if configured
+                            let indexer = if config.embeddings.is_enabled() {
+                                // Build embedding config from app config
+                                let provider_type = match config.embeddings.provider.as_str() {
+                                    "local" => ProviderType::Local,
+                                    "remote" => ProviderType::Remote,
+                                    _ => ProviderType::None,
+                                };
+
+                                let auth_method = match config.embeddings.auth_method.as_str() {
+                                    "api-key" => AuthMethod::ApiKey,
+                                    _ => AuthMethod::Bearer,
+                                };
+
+                                // Get API key from environment
+                                let api_key = std::env::var("OPENAI_API_KEY")
+                                    .or_else(|_| std::env::var("AZURE_OPENAI_API_KEY"))
+                                    .ok();
+
+                                let embed_config = EmbeddingConfig {
+                                    provider: provider_type,
+                                    model: config.embeddings.model.clone(),
+                                    api_key,
+                                    api_base: config.embeddings.api_base.clone(),
+                                    auth_method,
+                                    dimensions: None, // Auto-detect from model
+                                    batch_size: config.embeddings.batch_size,
+                                    timeout_secs: 30,
+                                };
+
+                                // Create indexer config
+                                let indexer_config = pipeline::embedding_indexer::IndexerConfig {
+                                    db_path: config.lifestats.db_path.clone(),
+                                    embedding_config: embed_config.clone(),
+                                    poll_interval: std::time::Duration::from_secs(
+                                        config.embeddings.poll_interval_secs,
+                                    ),
+                                    batch_size: config.embeddings.batch_size,
+                                    batch_delay: std::time::Duration::from_millis(
+                                        config.embeddings.batch_delay_ms,
+                                    ),
+                                    max_content_length: config.embeddings.max_content_length,
+                                };
+
+                                // Create embedding provider
+                                let provider = embeddings::create_provider(&embed_config);
+
+                                if provider.is_ready() {
+                                    match EmbeddingIndexer::new(indexer_config, provider) {
+                                        Ok(indexer) => {
+                                            tracing::info!(
+                                                "Embedding indexer started (provider: {}, model: {})",
+                                                config.embeddings.provider,
+                                                config.embeddings.model
+                                            );
+                                            Some(indexer)
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                                "Failed to start embedding indexer: {}",
+                                                e
+                                            );
+                                            None
+                                        }
+                                    }
+                                } else {
+                                    tracing::debug!(
+                                        "Embedding provider not ready (provider: {})",
+                                        config.embeddings.provider
+                                    );
+                                    None
+                                }
+                            } else {
+                                None
+                            };
+
                             (
                                 Some(std::sync::Arc::new(pipeline)),
                                 Some(std::sync::Arc::new(query)),
+                                indexer,
                             )
                         }
                         Err(e) => {
@@ -304,18 +387,18 @@ async fn main() -> Result<()> {
                                 "Failed to initialize lifestats query interface: {}",
                                 e
                             );
-                            (Some(std::sync::Arc::new(pipeline)), None)
+                            (Some(std::sync::Arc::new(pipeline)), None, None)
                         }
                     }
                 }
                 Err(e) => {
                     tracing::error!("Failed to initialize lifestats processor: {}", e);
-                    (None, None)
+                    (None, None, None)
                 }
             }
         } else {
             tracing::debug!("Lifestats processor disabled in config");
-            (None, None)
+            (None, None, None)
         };
 
         // Bundle channels and shared state for the proxy
@@ -327,6 +410,12 @@ async fn main() -> Result<()> {
         // Clone pipeline Arc before moving into shared (needed for shutdown)
         pipeline_for_shutdown = pipeline.clone();
 
+        // Create indexer handle before moving ownership (for API access)
+        let indexer_handle = embedding_indexer.as_ref().map(|i| i.handle());
+
+        // Store indexer for shutdown
+        indexer_for_shutdown = embedding_indexer;
+
         let shared = proxy::SharedState {
             stats: shared_stats.clone(),
             events: shared_events.clone(),
@@ -335,6 +424,7 @@ async fn main() -> Result<()> {
             streaming_thinking: proxy_streaming_thinking,
             pipeline,
             lifestats_query,
+            embedding_indexer: indexer_handle,
         };
         tokio::spawn(async move {
             proxy::start_proxy(proxy_config, channels, shutdown_rx, shared)
@@ -376,6 +466,16 @@ async fn main() -> Result<()> {
             // Continue shutdown despite pipeline error - other components need cleanup
         } else {
             tracing::debug!("Event pipeline shutdown complete");
+        }
+    }
+
+    // Shutdown embedding indexer
+    if let Some(indexer) = indexer_for_shutdown {
+        tracing::debug!("Shutting down embedding indexer...");
+        if let Err(e) = indexer.shutdown() {
+            tracing::error!("Embedding indexer shutdown error: {}", e);
+        } else {
+            tracing::debug!("Embedding indexer shutdown complete");
         }
     }
 

@@ -1108,6 +1108,194 @@ server.registerTool(
   }
 );
 
+// Tool: aspy_lifestats_embeddings_status (Check Embedding Indexer Status)
+interface EmbeddingStatusResponse {
+  [key: string]: unknown;
+  enabled: boolean;
+  provider: string;
+  model: string;
+  dimensions: number;
+  documents_embedded: number;
+  documents_total: number;
+  progress_pct: number;
+}
+
+server.registerTool(
+  "aspy_lifestats_embeddings_status",
+  {
+    title: "Embedding Status",
+    description:
+      "Check the status of the semantic embedding indexer. Shows whether embeddings are enabled, the provider/model configuration, and indexing progress.",
+    inputSchema: {},
+    outputSchema: {
+      enabled: z.boolean(),
+      provider: z.string(),
+      model: z.string(),
+      dimensions: z.number(),
+      documents_embedded: z.number(),
+      documents_total: z.number(),
+      progress_pct: z.number(),
+    },
+  },
+  async () => {
+    const result = await fetchApi<EmbeddingStatusResponse>("/api/lifestats/embeddings/status");
+
+    if (!result.ok) {
+      return {
+        content: [{ type: "text" as const, text: `Error: ${result.error.error}` }],
+        isError: true,
+      };
+    }
+
+    const data = result.data;
+
+    // Build human-readable summary
+    const statusIcon = data.enabled ? "🧠" : "📚";
+    const statusLabel = data.enabled ? "Enabled" : "Disabled (FTS-only)";
+    const summaryParts = [`${statusIcon} **Embeddings: ${statusLabel}**\n`];
+
+    if (data.enabled) {
+      summaryParts.push(`Provider: ${data.provider}`);
+      summaryParts.push(`Model: ${data.model}`);
+      summaryParts.push(`Dimensions: ${data.dimensions}`);
+      summaryParts.push(`\n**Indexing Progress:**`);
+      summaryParts.push(`Documents: ${data.documents_embedded} / ${data.documents_total} (${data.progress_pct.toFixed(1)}%)`);
+    } else {
+      summaryParts.push("Semantic search is disabled. Using FTS5 keyword search only.");
+      summaryParts.push("\n💡 To enable semantic search, add to ~/.config/aspy/config.toml:");
+      summaryParts.push("```toml");
+      summaryParts.push("[embeddings]");
+      summaryParts.push('provider = "remote"');
+      summaryParts.push('model = "text-embedding-3-small"');
+      summaryParts.push("```");
+      summaryParts.push("Then set OPENAI_API_KEY environment variable.");
+    }
+
+    return {
+      content: [
+        { type: "text" as const, text: summaryParts.join("\n") },
+        { type: "text" as const, text: JSON.stringify(data, null, 2) },
+      ],
+      structuredContent: data,
+    };
+  }
+);
+
+// Tool: aspy_lifestats_context_hybrid (SEMANTIC + FTS Hybrid Search)
+interface HybridContextResponse {
+  [key: string]: unknown;
+  topic: string;
+  mode: string;
+  search_type: string; // "fts_only" or "hybrid"
+  results: ContextMatch[];
+}
+
+server.registerTool(
+  "aspy_lifestats_context_hybrid",
+  {
+    title: "Hybrid Context Recovery (Semantic + FTS)",
+    description:
+      "BEST QUALITY: Hybrid context recovery combining semantic vector search with FTS5 keyword search using Reciprocal Rank Fusion (RRF). Provides superior results when embeddings are configured. Falls back to FTS-only if embeddings are unavailable.",
+    inputSchema: {
+      topic: z.string().min(2).describe("Topic to search for (min 2 characters)"),
+      limit: z
+        .number()
+        .min(1)
+        .max(50)
+        .default(10)
+        .describe("Maximum total results (default: 10, max: 50)"),
+      mode: z
+        .enum(["phrase", "natural", "raw"])
+        .default("phrase")
+        .describe(
+          "FTS search mode: phrase (exact match), natural (AND/OR/NOT operators), raw (full FTS5 syntax)"
+        ),
+    },
+    outputSchema: {
+      topic: z.string(),
+      mode: z.string(),
+      search_type: z.string(),
+      results: z.array(
+        z.object({
+          match_type: z.string(),
+          session_id: z.string().nullable(),
+          timestamp: z.string(),
+          content: z.string(),
+          rank: z.number(),
+        })
+      ),
+    },
+  },
+  async ({ topic, limit = 10, mode = "phrase" }) => {
+    const userId = getUserId();
+    if (!userId) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: "Error: Cannot determine user identity. Ensure ANTHROPIC_API_KEY is set.",
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const params = new URLSearchParams();
+    params.set("topic", topic);
+    params.set("limit", String(limit));
+    params.set("mode", mode);
+
+    const result = await fetchApi<HybridContextResponse>(
+      `/api/lifestats/context/hybrid/user/${userId}?${params}`
+    );
+
+    if (!result.ok) {
+      return {
+        content: [{ type: "text" as const, text: `Error: ${result.error.error}` }],
+        isError: true,
+      };
+    }
+
+    const data = result.data;
+
+    // Build human-readable summary with search type indicator
+    const searchIcon = data.search_type === "hybrid" ? "🧠+📚" : "📚";
+    const searchLabel = data.search_type === "hybrid" ? "Hybrid (Semantic + FTS)" : "FTS-only";
+    const summaryParts = [
+      `${searchIcon} **${searchLabel}** Context Recovery: Found ${data.results.length} match(es) for "${data.topic}":`,
+    ];
+
+    if (data.results.length === 0) {
+      summaryParts.push("\nNo matches found. Try:");
+      summaryParts.push("  - Different keywords");
+      summaryParts.push('  - mode: "natural" with AND/OR operators');
+      summaryParts.push("  - Broader search terms");
+      if (data.search_type === "fts_only") {
+        summaryParts.push("\n💡 Tip: Configure embeddings for semantic search capabilities");
+      }
+    } else {
+      summaryParts.push("");
+      for (const r of data.results) {
+        const session = r.session_id?.slice(0, 8) ?? "unknown";
+        const date = r.timestamp.split("T")[0];
+        const typeLabel = formatMatchType(r.match_type);
+        summaryParts.push(
+          `${typeLabel} **[${date}]** (session: ${session}, score: ${Math.abs(r.rank).toFixed(3)})`
+        );
+        summaryParts.push(`${truncateContent(r.content)}\n`);
+      }
+    }
+
+    return {
+      content: [
+        { type: "text" as const, text: summaryParts.join("\n") },
+        { type: "text" as const, text: JSON.stringify(data, null, 2) },
+      ],
+      structuredContent: data,
+    };
+  }
+);
+
 // Tool: aspy_lifestats_stats
 server.registerTool(
   "aspy_lifestats_stats",

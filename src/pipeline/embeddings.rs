@@ -447,9 +447,7 @@ impl OpenAiCompatibleProvider {
     /// # Errors
     /// Returns an error if API key is missing or client creation fails
     pub fn new(config: &EmbeddingConfig) -> Result<Self, EmbeddingError> {
-        let api_key = config.api_key.clone().ok_or_else(|| {
-            EmbeddingError::NotConfigured
-        })?;
+        let api_key = config.api_key.clone().ok_or(EmbeddingError::NotConfigured)?;
 
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(config.timeout_secs))

@@ -22,35 +22,35 @@ This project follows a **composition-over-inheritance** model using Rust's trait
 
 **Why:** Composition allows features to be independent, testable, and discoverable. A component gains capabilities by implementing traits, not by inheriting from a base class. This prevents "god objects" like `app.rs` from accumulating unrelated responsibilities.
 
-## Layered Architecture: Kernel, Userland, User Space
+## Layered Architecture: Core, Extensions, Custom
 
-The codebase is organized into three conceptual layers, similar to operating system architecture:
+The codebase is organized into three conceptual layers (inspired by Linux's kernel/userland separation, adapted for our domain):
 
-**1. Kernel (Core System)**
+**1. Core**
 - **What:** Proxy server, SSE handling, event system, TUI framework, parser
 - **Characteristics:** Cannot be disabled, app doesn't function without these components
 - **Config Toggle:** No (fundamental infrastructure)
-- **Dependencies:** Kernel components may depend on each other, but NEVER on userland
+- **Dependencies:** Core components may depend on each other, but NEVER on extensions
 - **Examples:** `proxy/mod.rs`, `events.rs`, `parser/mod.rs`, `tui/mod.rs`
 
-**2. Userland (Optional Core Features)**
+**2. Extensions**
 - **What:** Augmentors, specific panels, themes, analytics
 - **Characteristics:** Enhance user experience, but system functions without any specific one
 - **Config Toggle:** Yes (MUST be config-toggleable)
-- **Dependencies:** Can depend on kernel, NEVER on other userland features
+- **Dependencies:** Can depend on core, NEVER on other extensions
 - **Examples:** `proxy/augmentation/context_warning.rs`, `tui/components/theme_list_panel.rs`
 
-**3. User Space (Custom Extensions)**
+**3. Custom**
 - **What:** User-provided themes, custom configurations, future plugins
 - **Characteristics:** Completely external, user brings their own
 - **Config Toggle:** Yes (enable/disable at will)
 - **Dependencies:** Interacts via public APIs only
-- **Examples:** Custom theme JSON files, `.config/aspy/config.toml`
+- **Examples:** Custom theme TOML files, `.config/aspy/config.toml`
 
 **Decision Tree:**
-- Can the app function without this feature? **No** → Kernel | **Yes** → Userland
-- Is this user-provided content? **Yes** → User Space
-- Does this augment the stream or UI? **Yes** → Userland (must be toggleable)
+- Can the app function without this feature? **No** → Core | **Yes** → Extension
+- Is this user-provided content? **Yes** → Custom
+- Does this augment the stream or UI? **Yes** → Extension (must be toggleable)
 
 ## Project Structure
 
@@ -58,31 +58,31 @@ The following structure reflects our target organization. Current code may not f
 
 ```
 src/
-├── main.rs                  # Orchestration (kernel)
-├── events.rs                # Event system (kernel)
-├── config.rs                # Configuration loading (kernel)
+├── main.rs                  # Orchestration (core)
+├── events.rs                # Event system (core)
+├── config.rs                # Configuration loading (core)
 │
-├── proxy/                   # HTTP interception (kernel)
+├── proxy/                   # HTTP interception (core)
 │   ├── mod.rs
-│   ├── augmentation/        # Stream transformations (userland)
+│   ├── augmentation/        # Stream transformations (extension)
 │   │   ├── mod.rs
 │   │   ├── context_warning.rs    # Context % tracking augmentor
 │   │   └── [future augmentors]
 │   └── helpers/             # Proxy-specific utilities
 │       └── sse.rs           # SSE parsing logic
 │
-├── parser/                  # Protocol extraction (kernel)
+├── parser/                  # Protocol extraction (core)
 │   ├── mod.rs
 │   └── helpers/             # Parser-specific utilities
 │       └── correlation.rs   # Tool call correlation
 │
-├── storage/                 # Event persistence (kernel)
+├── storage/                 # Event persistence (core)
 │   └── mod.rs
 │
-├── logging/                 # Custom tracing layer (kernel)
+├── logging/                 # Custom tracing layer (core)
 │   └── mod.rs
 │
-├── tui/                     # Terminal interface (kernel + userland)
+├── tui/                     # Terminal interface (core + extensions)
 │   ├── mod.rs               # Event loop, input handling
 │   ├── app.rs               # Application state container
 │   ├── ui.rs                # Rendering orchestration
@@ -94,7 +94,7 @@ src/
 │   │   ├── focusable.rs     # Focus management behavior
 │   │   └── interactive.rs   # Input handling behavior
 │   │
-│   ├── components/          # Reusable UI building blocks (userland)
+│   ├── components/          # Reusable UI building blocks (extension)
 │   │   ├── mod.rs
 │   │   ├── events_panel.rs
 │   │   ├── detail_panel.rs
@@ -103,7 +103,7 @@ src/
 │   │   ├── context_bar.rs
 │   │   └── theme_list_panel.rs
 │   │
-│   ├── views/               # Full-screen compositions (userland)
+│   ├── views/               # Full-screen compositions (extension)
 │   │   ├── mod.rs
 │   │   ├── main.rs          # Main dashboard view
 │   │   ├── settings.rs      # Settings view
@@ -123,8 +123,8 @@ src/
 │   └── helpers/             # TUI-specific utilities
 │       └── format.rs        # Token/duration formatting
 │
-└── themes/                  # Bundled themes (user space)
-    └── *.json
+└── themes/                  # Bundled themes (custom)
+    └── *.toml
 ```
 
 **Note on Current State:** The codebase currently uses `tui/traits/` but the target is conceptually `tui/behaviors/`. Both terms refer to the same concept (traits that define capabilities). The folder name is less important than the pattern: **one file per trait/behavior, organized by feature**.

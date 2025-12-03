@@ -89,6 +89,7 @@ Once you see the full picture—which tools get called, how tokens flow, when ca
     <ul>
       <li><a href="{{ '/api-reference' | relative_url }}">API Reference</a> — REST endpoints</li>
       <li><a href="{{ '/log-analysis' | relative_url }}">Log Analysis</a> — jq queries and session recovery</li>
+      <li><a href="{{ '/semantic-search-guide' | relative_url }}">Semantic Search</a> — Embedding providers and hybrid search</li>
       <li><a href="{{ '/architecture' | relative_url }}">Architecture</a> — Design patterns and internals</li>
     </ul>
   </div>

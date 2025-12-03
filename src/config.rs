@@ -67,6 +67,49 @@ pub struct LoggingConfig {
     pub level: String,
 }
 
+/// Embedding configuration for semantic search
+#[derive(Debug, Clone)]
+pub struct EmbeddingsConfig {
+    /// Provider type: "none", "local", "remote"
+    pub provider: String,
+    /// Model name (e.g., "all-MiniLM-L6-v2", "text-embedding-3-small")
+    pub model: String,
+    /// API base URL for remote providers
+    pub api_base: Option<String>,
+    /// Authentication method: "bearer" or "api-key"
+    pub auth_method: String,
+    /// Polling interval for background indexer (seconds)
+    pub poll_interval_secs: u64,
+    /// Batch size for embedding requests
+    pub batch_size: usize,
+    /// Delay between batches (milliseconds)
+    pub batch_delay_ms: u64,
+    /// Maximum content length to embed (characters)
+    pub max_content_length: usize,
+}
+
+impl Default for EmbeddingsConfig {
+    fn default() -> Self {
+        Self {
+            provider: "none".to_string(),
+            model: String::new(),
+            api_base: None,
+            auth_method: "bearer".to_string(),
+            poll_interval_secs: 30,
+            batch_size: 32,
+            batch_delay_ms: 100,
+            max_content_length: 8000,
+        }
+    }
+}
+
+impl EmbeddingsConfig {
+    /// Check if embeddings are enabled
+    pub fn is_enabled(&self) -> bool {
+        self.provider != "none" && !self.provider.is_empty()
+    }
+}
+
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
@@ -247,6 +290,9 @@ pub struct Config {
     /// Lifetime statistics storage configuration
     pub lifestats: LifestatsConfig,
 
+    /// Embeddings configuration for semantic search
+    pub embeddings: EmbeddingsConfig,
+
     /// Client and provider configuration for multi-user routing
     pub clients: ClientsConfig,
 }
@@ -285,6 +331,19 @@ struct FileLifestatsConfig {
     flush_interval_secs: Option<u64>,
 }
 
+/// Embeddings config as loaded from file
+#[derive(Debug, Deserialize, Default)]
+struct FileEmbeddingsConfig {
+    provider: Option<String>,
+    model: Option<String>,
+    api_base: Option<String>,
+    auth_method: Option<String>,
+    poll_interval_secs: Option<u64>,
+    batch_size: Option<usize>,
+    batch_delay_ms: Option<u64>,
+    max_content_length: Option<usize>,
+}
+
 /// Config file structure (subset of Config that makes sense to persist)
 #[derive(Debug, Deserialize, Default)]
 struct FileConfig {
@@ -307,6 +366,9 @@ struct FileConfig {
 
     /// Optional [lifestats] section
     lifestats: Option<FileLifestatsConfig>,
+
+    /// Optional [embeddings] section
+    embeddings: Option<FileEmbeddingsConfig>,
 
     /// Optional [clients.X] sections for multi-user routing
     #[serde(default)]
@@ -475,6 +537,26 @@ batch_size = {lifestats_batch_size}
 flush_interval_secs = {lifestats_flush_interval_secs}
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SEMANTIC SEARCH EMBEDDINGS (Optional)
+# ─────────────────────────────────────────────────────────────────────────────
+# Enable vector embeddings for semantic search alongside FTS5 keyword search.
+# API keys should be set via environment variables (OPENAI_API_KEY, etc.)
+#
+# Provider options: "none" (default), "local", "remote"
+# - none: FTS5 keyword search only (no embeddings)
+# - local: ONNX models via fastembed (requires --features local-embeddings)
+# - remote: OpenAI-compatible API (OpenAI, Azure, OpenRouter)
+[embeddings]
+provider = "{embed_provider}"
+model = "{embed_model}"
+# api_base = "https://api.openai.com/v1"  # For remote provider
+# auth_method = "bearer"                   # "bearer" or "api-key" (Azure)
+poll_interval_secs = {embed_poll_interval}
+batch_size = {embed_batch_size}
+batch_delay_ms = {embed_batch_delay}
+max_content_length = {embed_max_content}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # MULTI-CLIENT ROUTING (Optional)
 # ─────────────────────────────────────────────────────────────────────────────
 # Track multiple Claude Code instances through a single proxy using named clients.
@@ -509,6 +591,12 @@ flush_interval_secs = {lifestats_flush_interval_secs}
             lifestats_channel_buffer = self.lifestats.channel_buffer,
             lifestats_batch_size = self.lifestats.batch_size,
             lifestats_flush_interval_secs = self.lifestats.flush_interval_secs,
+            embed_provider = self.embeddings.provider,
+            embed_model = self.embeddings.model,
+            embed_poll_interval = self.embeddings.poll_interval_secs,
+            embed_batch_size = self.embeddings.batch_size,
+            embed_batch_delay = self.embeddings.batch_delay_ms,
+            embed_max_content = self.embeddings.max_content_length,
             clients_section = self.clients_to_toml(),
             providers_section = self.providers_to_toml(),
         )
@@ -640,6 +728,32 @@ flush_interval_secs = {lifestats_flush_interval_secs}
                 .unwrap_or(defaults.flush_interval_secs),
         };
 
+        // Embeddings settings: file config + env var for API key
+        let file_embeddings = file.embeddings.unwrap_or_default();
+        let embed_defaults = EmbeddingsConfig::default();
+        let embeddings = EmbeddingsConfig {
+            provider: file_embeddings
+                .provider
+                .unwrap_or(embed_defaults.provider),
+            model: file_embeddings.model.unwrap_or(embed_defaults.model),
+            api_base: file_embeddings.api_base.or(embed_defaults.api_base),
+            auth_method: file_embeddings
+                .auth_method
+                .unwrap_or(embed_defaults.auth_method),
+            poll_interval_secs: file_embeddings
+                .poll_interval_secs
+                .unwrap_or(embed_defaults.poll_interval_secs),
+            batch_size: file_embeddings
+                .batch_size
+                .unwrap_or(embed_defaults.batch_size),
+            batch_delay_ms: file_embeddings
+                .batch_delay_ms
+                .unwrap_or(embed_defaults.batch_delay_ms),
+            max_content_length: file_embeddings
+                .max_content_length
+                .unwrap_or(embed_defaults.max_content_length),
+        };
+
         // Client/provider config: file only
         let clients = ClientsConfig {
             clients: file.clients,
@@ -669,6 +783,7 @@ flush_interval_secs = {lifestats_flush_interval_secs}
             augmentation,
             logging,
             lifestats,
+            embeddings,
             clients,
         }
     }
@@ -690,6 +805,7 @@ impl Default for Config {
             augmentation: Augmentation::default(),
             logging: LoggingConfig::default(),
             lifestats: LifestatsConfig::default(),
+            embeddings: EmbeddingsConfig::default(),
             clients: ClientsConfig::default(),
         }
     }

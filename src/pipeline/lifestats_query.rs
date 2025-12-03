@@ -1360,6 +1360,168 @@ impl LifestatsQuery {
             .collect())
     }
 
+    /// Hybrid context recovery for a specific user
+    ///
+    /// Combines FTS5 keyword search with semantic vector search using
+    /// Reciprocal Rank Fusion (RRF), filtered to a specific user.
+    /// Falls back to FTS-only if no embedding is provided.
+    pub fn recover_context_hybrid_user(
+        &self,
+        user_id: &str,
+        query: &str,
+        query_embedding: Option<&[f32]>,
+        limit: usize,
+        mode: SearchMode,
+    ) -> anyhow::Result<Vec<ContextMatch>> {
+        const RRF_K: f64 = 60.0;
+
+        // Get FTS results (user-scoped)
+        let fts_results = self.recover_user_context(user_id, query, limit * 2, mode)?;
+
+        // If no embedding provided, return FTS results only
+        let query_embedding = match query_embedding {
+            Some(e) => e,
+            None => return Ok(fts_results.into_iter().take(limit).collect()),
+        };
+
+        // Get semantic results and filter by user
+        // Note: semantic search returns all matches, we filter by user here
+        let mut semantic_results = Vec::new();
+
+        for m in self.search_thinking_semantic(query_embedding, limit * 4)? {
+            // Filter by user - session_id format is "user_id/session_uuid"
+            if let Some(ref session_id) = m.session_id {
+                if session_id.starts_with(user_id) || session_id.contains(&format!("/{}", user_id)) {
+                    semantic_results.push(ContextMatch {
+                        match_type: MatchType::Thinking,
+                        session_id: m.session_id,
+                        timestamp: m.timestamp,
+                        content: m.content,
+                        rank: m.rank,
+                    });
+                }
+            }
+        }
+
+        for m in self.search_prompts_semantic(query_embedding, limit * 4)? {
+            if let Some(ref session_id) = m.session_id {
+                if session_id.starts_with(user_id) || session_id.contains(&format!("/{}", user_id)) {
+                    semantic_results.push(ContextMatch {
+                        match_type: MatchType::UserPrompt,
+                        session_id: m.session_id,
+                        timestamp: m.timestamp,
+                        content: m.content,
+                        rank: m.rank,
+                    });
+                }
+            }
+        }
+
+        for m in self.search_responses_semantic(query_embedding, limit * 4)? {
+            if let Some(ref session_id) = m.session_id {
+                if session_id.starts_with(user_id) || session_id.contains(&format!("/{}", user_id)) {
+                    semantic_results.push(ContextMatch {
+                        match_type: MatchType::AssistantResponse,
+                        session_id: m.session_id,
+                        timestamp: m.timestamp,
+                        content: m.content,
+                        rank: m.rank,
+                    });
+                }
+            }
+        }
+
+        // Truncate semantic results to reasonable limit after filtering
+        semantic_results.truncate(limit * 2);
+
+        // Build document map for RRF fusion
+        use std::collections::HashMap;
+
+        #[derive(Hash, Eq, PartialEq, Clone)]
+        struct DocKey {
+            session_id: Option<String>,
+            timestamp: String,
+        }
+
+        struct DocScores {
+            fts_rank: Option<usize>,
+            vec_rank: Option<usize>,
+            match_info: ContextMatch,
+        }
+
+        let mut doc_map: HashMap<DocKey, DocScores> = HashMap::new();
+
+        // Add FTS results with rank
+        for (rank, m) in fts_results.iter().enumerate() {
+            let key = DocKey {
+                session_id: m.session_id.clone(),
+                timestamp: m.timestamp.clone(),
+            };
+
+            doc_map.insert(
+                key,
+                DocScores {
+                    fts_rank: Some(rank),
+                    vec_rank: None,
+                    match_info: m.clone(),
+                },
+            );
+        }
+
+        // Add/update semantic results with rank
+        for (rank, m) in semantic_results.iter().enumerate() {
+            let key = DocKey {
+                session_id: m.session_id.clone(),
+                timestamp: m.timestamp.clone(),
+            };
+
+            if let Some(scores) = doc_map.get_mut(&key) {
+                scores.vec_rank = Some(rank);
+            } else {
+                doc_map.insert(
+                    key,
+                    DocScores {
+                        fts_rank: None,
+                        vec_rank: Some(rank),
+                        match_info: m.clone(),
+                    },
+                );
+            }
+        }
+
+        // Compute RRF scores
+        let mut scored_results: Vec<(f64, ContextMatch)> = doc_map
+            .into_values()
+            .map(|scores| {
+                let fts_score = scores
+                    .fts_rank
+                    .map(|r| 1.0 / (RRF_K + r as f64))
+                    .unwrap_or(0.0);
+                let vec_score = scores
+                    .vec_rank
+                    .map(|r| 1.0 / (RRF_K + r as f64))
+                    .unwrap_or(0.0);
+                let rrf_score = fts_score + vec_score;
+
+                // Store negative RRF as rank (lower = better, for API consistency)
+                let mut match_info = scores.match_info;
+                match_info.rank = -rrf_score;
+
+                (rrf_score, match_info)
+            })
+            .collect();
+
+        // Sort by RRF score descending (higher = better)
+        scored_results.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Return top results
+        Ok(scored_results
+            .into_iter()
+            .take(limit)
+            .map(|(_, m)| m)
+            .collect())
+    }
+
     /// Check if embeddings are available for hybrid search
     pub fn has_embeddings(&self) -> anyhow::Result<bool> {
         let conn = self.conn()?;

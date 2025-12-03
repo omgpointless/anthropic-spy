@@ -551,13 +551,95 @@ fn prompt_bool(question: &str, default: bool) -> bool {
 // ═══════════════════════════════════════════════════════════════════════════
 
 fn handle_embeddings_status() {
+    let config = Config::from_env();
+
+    // Try API first (if proxy is running, get live status)
+    if let Some(status) = try_api_embeddings_status(&config) {
+        print_embeddings_status_live(&status);
+        return;
+    }
+
+    // Fall back to direct database query
+    print_embeddings_status_db(&config);
+}
+
+/// Response from /api/lifestats/embeddings/status
+#[derive(serde::Deserialize)]
+struct LiveIndexerStatus {
+    enabled: bool,
+    running: bool,
+    provider: String,
+    model: String,
+    dimensions: usize,
+    documents_indexed: u64,
+    documents_pending: u64,
+    index_progress_pct: f64,
+}
+
+/// Try to get live status from running proxy API
+fn try_api_embeddings_status(config: &Config) -> Option<LiveIndexerStatus> {
+    let url = format!("http://{}/api/lifestats/embeddings/status", config.bind_addr);
+
+    // Use blocking client with short timeout
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_millis(500))
+        .build()
+        .ok()?;
+
+    let response = client.get(&url).send().ok()?;
+    if response.status().is_success() {
+        response.json().ok()
+    } else {
+        None
+    }
+}
+
+/// Print status from live API response
+fn print_embeddings_status_live(status: &LiveIndexerStatus) {
+    println!("Embeddings Status (Live)");
+    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    println!();
+    println!("  Indexer:    {} (connected to running proxy)", if status.running { "RUNNING" } else { "IDLE" });
+    println!("  Provider:   {}", if !status.enabled { "disabled".to_string() } else { status.provider.clone() });
+    if status.enabled {
+        println!("  Model:      {}", status.model);
+        println!("  Dimensions: {}", status.dimensions);
+    }
+    println!();
+    println!("  Index Progress");
+    println!("  ──────────────────────────────────────────────────────────────────────────");
+    println!(
+        "  Indexed:    {} documents",
+        status.documents_indexed
+    );
+    println!(
+        "  Pending:    {} documents",
+        status.documents_pending
+    );
+    println!(
+        "  Progress:   {:.1}%",
+        status.index_progress_pct
+    );
+    println!();
+
+    if !status.enabled {
+        println!("  To enable embeddings, add to ~/.config/aspy/config.toml:");
+        println!();
+        println!("    [embeddings]");
+        println!("    provider = \"remote\"");
+        println!("    model = \"text-embedding-3-small\"");
+        println!("    api_base = \"https://api.openai.com/v1\"");
+    }
+}
+
+/// Print status from direct database query (fallback when proxy not running)
+fn print_embeddings_status_db(config: &Config) {
     use crate::pipeline::lifestats_query::LifestatsQuery;
 
-    let config = Config::from_env();
-    let db_path = config.log_dir.join("lifestats.db");
+    let db_path = &config.lifestats.db_path;
 
     if !db_path.exists() {
-        println!("Embeddings Status");
+        println!("Embeddings Status (Offline)");
         println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         println!();
         println!("  Database: Not found");
@@ -568,12 +650,14 @@ fn handle_embeddings_status() {
         return;
     }
 
-    match LifestatsQuery::new(&db_path) {
+    match LifestatsQuery::new(db_path) {
         Ok(query) => {
             match query.embedding_stats() {
                 Ok(stats) => {
-                    println!("Embeddings Status");
+                    println!("Embeddings Status (Offline)");
                     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+                    println!();
+                    println!("  Note: Proxy not running. Showing database snapshot.");
                     println!();
                     println!("  Provider:   {}", if stats.provider == "none" { "disabled".to_string() } else { stats.provider.clone() });
                     if stats.provider != "none" {
@@ -624,10 +708,9 @@ fn handle_embeddings_status() {
                         println!("  To enable embeddings, add to ~/.config/aspy/config.toml:");
                         println!();
                         println!("    [embeddings]");
-                        println!("    provider = \"local\"");
-                        println!("    model = \"all-MiniLM-L6-v2\"");
-                        println!();
-                        println!("  Then rebuild with: cargo build --release --features local-embeddings");
+                        println!("    provider = \"remote\"");
+                        println!("    model = \"text-embedding-3-small\"");
+                        println!("    api_base = \"https://api.openai.com/v1\"");
                     }
                 }
                 Err(e) => {
@@ -644,16 +727,7 @@ fn handle_embeddings_status() {
 }
 
 fn handle_embeddings_reindex() {
-    use rusqlite::Connection;
-
     let config = Config::from_env();
-    let db_path = config.log_dir.join("lifestats.db");
-
-    if !db_path.exists() {
-        eprintln!("Error: Database not found at {}", db_path.display());
-        eprintln!("Run aspy normally first to create the database.");
-        std::process::exit(1);
-    }
 
     // Confirm before clearing
     eprint!(
@@ -669,10 +743,53 @@ fn handle_embeddings_reindex() {
         return;
     }
 
+    // Try API first (if proxy is running, trigger live reindex)
+    if try_api_trigger_reindex(&config) {
+        println!("✓ Reindex triggered on running proxy.");
+        println!();
+        println!("The indexer will clear existing embeddings and re-process all content.");
+        println!("Check progress with: aspy embeddings --status");
+        return;
+    }
+
+    // Fall back to direct database clear
+    handle_embeddings_reindex_db(&config);
+}
+
+/// Try to trigger reindex via running proxy API
+fn try_api_trigger_reindex(config: &Config) -> bool {
+    let url = format!("http://{}/api/lifestats/embeddings/reindex", config.bind_addr);
+
+    // Use blocking client with short timeout
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_millis(2000))
+        .build() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    match client.post(&url).send() {
+        Ok(response) => response.status().is_success(),
+        Err(_) => false,
+    }
+}
+
+/// Clear embeddings directly in database (fallback when proxy not running)
+fn handle_embeddings_reindex_db(config: &Config) {
+    use rusqlite::Connection;
+
+    let db_path = &config.lifestats.db_path;
+
+    if !db_path.exists() {
+        eprintln!("Error: Database not found at {}", db_path.display());
+        eprintln!("Run aspy normally first to create the database.");
+        std::process::exit(1);
+    }
+
     // Open database and clear embeddings
-    match Connection::open(&db_path) {
+    match Connection::open(db_path) {
         Ok(conn) => {
-            println!("Clearing existing embeddings...");
+            println!("Proxy not running. Clearing embeddings directly in database...");
 
             if let Err(e) = conn.execute("DELETE FROM thinking_embeddings", []) {
                 eprintln!("Error clearing thinking_embeddings: {}", e);

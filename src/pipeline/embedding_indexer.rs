@@ -26,7 +26,7 @@
 
 use super::embeddings::{
     BatchEmbeddingResult, Embedding, EmbeddingConfig, EmbeddingError, EmbeddingProvider,
-    EmbeddingStatus,
+    EmbeddingStatus, ProviderType,
 };
 use rusqlite::{params, Connection};
 use std::path::PathBuf;
@@ -179,6 +179,62 @@ impl CompletionSignal {
     }
 }
 
+/// Clonable handle to the embedding indexer
+///
+/// Used to interact with the running indexer from multiple contexts
+/// (API handlers, CLI, etc.) without owning the thread handle.
+#[derive(Clone)]
+pub struct IndexerHandle {
+    /// Channel to send commands to indexer thread
+    tx: SyncSender<IndexerCommand>,
+    /// Shared metrics
+    metrics: Arc<IndexerMetrics>,
+    /// Provider type for status
+    provider_type: ProviderType,
+    /// Model name for status
+    model: String,
+    /// Dimensions for status
+    dimensions: usize,
+}
+
+impl IndexerHandle {
+    /// Get current metrics snapshot
+    pub fn metrics(&self) -> MetricsSnapshot {
+        self.metrics.snapshot()
+    }
+
+    /// Get current status
+    pub fn status(&self) -> EmbeddingStatus {
+        let metrics = self.metrics.snapshot();
+        let total = metrics.documents_embedded + metrics.documents_pending;
+        let progress = if total > 0 {
+            (metrics.documents_embedded as f64 / total as f64) * 100.0
+        } else {
+            100.0
+        };
+
+        EmbeddingStatus {
+            provider: self.provider_type,
+            model: self.model.clone(),
+            dimensions: self.dimensions,
+            is_ready: self.provider_type != ProviderType::None,
+            documents_indexed: metrics.documents_embedded,
+            documents_pending: metrics.documents_pending,
+            index_progress_pct: progress,
+        }
+    }
+
+    /// Trigger a poll for new content
+    pub fn trigger_poll(&self) {
+        let _ = self.tx.try_send(IndexerCommand::Poll);
+    }
+
+    /// Trigger a full re-index (clears existing embeddings and re-processes all content)
+    pub fn trigger_reindex(&self) {
+        let _ = self.tx.send(IndexerCommand::Reindex);
+    }
+}
+
 /// Background embedding indexer
 ///
 /// Polls for un-embedded content and generates embeddings using the
@@ -242,6 +298,22 @@ impl EmbeddingIndexer {
             metrics,
             config,
         })
+    }
+
+    /// Get a clonable handle to this indexer
+    ///
+    /// The handle can be shared across threads and used to:
+    /// - Check indexer status
+    /// - Trigger polling/reindexing
+    /// - Read metrics
+    pub fn handle(&self) -> IndexerHandle {
+        IndexerHandle {
+            tx: self.tx.clone(),
+            metrics: self.metrics.clone(),
+            provider_type: self.config.embedding_config.provider,
+            model: self.config.embedding_config.model.clone(),
+            dimensions: self.config.embedding_config.get_dimensions(),
+        }
     }
 
     /// Get current metrics snapshot

@@ -113,6 +113,8 @@ pub struct ProxyState {
     pipeline: Option<Arc<EventPipeline>>,
     /// Query interface for lifestats database (optional, requires lifestats enabled)
     pub lifestats_query: Option<Arc<crate::pipeline::lifestats_query::LifestatsQuery>>,
+    /// Handle to the embedding indexer (optional, requires embeddings enabled)
+    pub embedding_indexer: Option<crate::pipeline::embedding_indexer::IndexerHandle>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -150,6 +152,8 @@ pub struct SharedState {
     pub pipeline: Option<Arc<EventPipeline>>,
     /// Query interface for lifestats database (optional, requires lifestats enabled)
     pub lifestats_query: Option<Arc<crate::pipeline::lifestats_query::LifestatsQuery>>,
+    /// Handle to the embedding indexer (optional, requires embeddings enabled)
+    pub embedding_indexer: Option<crate::pipeline::embedding_indexer::IndexerHandle>,
 }
 
 /// Context for handling an API response
@@ -227,6 +231,7 @@ pub async fn start_proxy(
         clients: config.clients.clone(),
         pipeline: shared.pipeline,
         lifestats_query: shared.lifestats_query,
+        embedding_indexer: shared.embedding_indexer,
     };
 
     // Build the router - API endpoints + proxy handler
@@ -293,6 +298,23 @@ pub async fn start_proxy(
         .route(
             "/api/lifestats/stats/user/:user_id",
             axum::routing::get(api::lifestats_stats_user),
+        )
+        // Semantic search / hybrid endpoints
+        .route(
+            "/api/lifestats/embeddings/status",
+            axum::routing::get(api::lifestats_embedding_status),
+        )
+        .route(
+            "/api/lifestats/embeddings/reindex",
+            axum::routing::post(api::lifestats_embedding_reindex),
+        )
+        .route(
+            "/api/lifestats/embeddings/poll",
+            axum::routing::post(api::lifestats_embedding_poll),
+        )
+        .route(
+            "/api/lifestats/context/hybrid/user/:user_id",
+            axum::routing::get(api::lifestats_context_hybrid_user),
         )
         // Proxy handler (catch-all)
         .route("/*path", any(proxy_handler))
