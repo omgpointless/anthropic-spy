@@ -363,16 +363,14 @@ tr:hover {
   margin-bottom: 0.5rem;
 }
 
-.post-meta {
+.post-meta,
+.post-list-meta {
   color: $muted;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   display: flex;
-  gap: 10px;
-
-  time {
-    line-height: 1.6rem;
-  }
-
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .post-content {
@@ -405,6 +403,7 @@ tr:hover {
 
 .post-list-title {
   font-size: 1.25rem;
+  margin-top: 0.1rem;
   margin-bottom: 0.25rem;
 
   a {
@@ -417,9 +416,11 @@ tr:hover {
 }
 
 .post-list-meta {
-  color: $muted;
-  font-size: 0.85rem;
   margin-bottom: 0.5rem;
+}
+
+.meta-separator {
+  color: $border;
 }
 
 .post-list-excerpt {
@@ -484,16 +485,53 @@ tr:hover {
   display: inline-block;
   background-color: $background-lighter;
   color: $tool-call;
-  padding: 0.075rem 0.6rem;
+  padding: 0.15rem 0.6rem 0.2rem;
   border-radius: 4px;
-  font-size: 0.75rem;
-  margin-right: 0.25rem;
+  font-size: 0.7rem;
+  font-weight: 500;
+  text-transform: capitalize;
+  letter-spacing: 0.02em;
   border: 1px solid $border;
+  text-decoration: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+
+  &:hover {
+    border-color: $border-focused;
+    background-color: $background-light;
+    text-decoration: none;
+  }
 
   &.tag-feature { color: $logs; border-color: $logs; }
   &.tag-fix { color: $tool-result-ok; border-color: $tool-result-ok; }
   &.tag-docs { color: $request; border-color: $request; }
   &.tag-thinking { color: $thinking; border-color: $thinking; }
+  &.tag-deep-dive { color: $thinking; border-color: $thinking; }
+  &.tag-architecture { color: $request; border-color: $request; }
+  &.tag-announcement { color: $context-compact; border-color: $context-compact; }
+  &.tag-story { color: $fill; border-color: $fill; }
+
+  // Meta tags (date, author) - clean minimal style
+  &.tag-date,
+  &.tag-author {
+    color: $muted;
+    border: none;
+    background-color: transparent;
+    font-family: $font-mono;
+    text-transform: none;
+    padding-left: 0;
+
+    &:hover {
+      border: none;
+      background-color: transparent;
+    }
+  }
+}
+
+.tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1.5rem 0;
 }
 
 // -----------------------------------------------------------------------------

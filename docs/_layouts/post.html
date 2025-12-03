@@ -4,21 +4,18 @@ layout: default
 
 <article class="post">
   <header class="post-header">
+    <time class="tag tag-date" datetime="{{ page.date | date_to_xmlschema }}">{{ page.date | date: "%b %-d, %Y" }}</time>
     <h1 class="post-title">{{ page.title }}</h1>
+    {% if page.tags or page.author %}
     <p class="post-meta">
-      <time datetime="{{ page.date | date_to_xmlschema }}">
-        {{ page.date | date: "%B %-d, %Y" }}
-      </time>
       {% if page.author %}
-      <span>&bull;</span> <span>{{ page.author }}</span>
+        <span class="tag tag-author">{{ page.author }}</span>
       {% endif %}
-      {% if page.tags %}
-        <span>&bull;</span>
-        {% for tag in page.tags %}
-          <span class="tag tag-{{ tag | slugify }}">{{ tag }}</span>
-        {% endfor %}
-      {% endif %}
+      {% for tag in page.tags %}
+        <a href="{{ '/tags/#' | append: tag | slugify | relative_url }}" class="tag tag-{{ tag | slugify }}">{{ tag }}</a>
+      {% endfor %}
     </p>
+    {% endif %}
   </header>
 
   <div class="post-content">

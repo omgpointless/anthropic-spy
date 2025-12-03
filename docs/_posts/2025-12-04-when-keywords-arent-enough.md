@@ -5,7 +5,7 @@ date: 2025-12-04
 tags: [architecture, feature, deep-dive]
 ---
 
-Last week I shipped [lifestats](/blog/2025/12/remembering-what-claude-forgot/)—SQLite storage with FTS5 full-text search. It was a huge improvement over the jq archaeology workflow. Queries that took minutes now took milliseconds.
+With [lifestats](/blog/2025/12/remembering-what-claude-forgot/), I shipped SQLite storage with FTS5 full-text search. It was a huge improvement over the jq archaeology workflow. Queries that took minutes now took milliseconds.
 
 But something was off.
 
