@@ -1,4 +1,4 @@
-![Aspy (Anthropic Spy)](docs/images/aspy-header-logo.webp)
+![Aspy (Anthropic Spy)](docs/images/aspy-logo-v4.png)
 
 [![CI](https://github.com/omgpointless/aspy/actions/workflows/ci.yml/badge.svg)](https://github.com/omgpointless/aspy/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/omgpointless/aspy?include_prereleases)](https://github.com/omgpointless/aspy/releases)

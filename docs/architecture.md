@@ -27,11 +27,11 @@ This project follows a **composition-over-inheritance** model using Rust's trait
 The codebase is organized into three conceptual layers (inspired by Linux's kernel/userland separation, adapted for our domain):
 
 **1. Core**
-- **What:** Proxy server, SSE handling, event system, TUI framework, parser
+- **What:** Proxy server, SSE handling, event system, TUI framework, parser, storage pipeline
 - **Characteristics:** Cannot be disabled, app doesn't function without these components
 - **Config Toggle:** No (fundamental infrastructure)
 - **Dependencies:** Core components may depend on each other, but NEVER on extensions
-- **Examples:** `proxy/mod.rs`, `events.rs`, `parser/mod.rs`, `tui/mod.rs`
+- **Examples:** `proxy/mod.rs`, `events.rs`, `parser/mod.rs`, `tui/mod.rs`, `pipeline/mod.rs`
 
 **2. Extensions**
 - **What:** Augmentors, specific panels, themes, analytics
@@ -78,6 +78,16 @@ src/
 │
 ├── storage/                 # Event persistence (core)
 │   └── mod.rs
+│
+├── pipeline/                # Data processing pipeline (core)
+│   ├── mod.rs               # Pipeline orchestration
+│   ├── lifestats.rs         # SQLite storage for lifetime stats
+│   ├── lifestats_query.rs   # Query interface (FTS5, stats)
+│   ├── embeddings.rs        # Embedding provider abstraction
+│   ├── embedding_indexer.rs # Background embedding indexer
+│   └── transformation/      # Request transformations (extension)
+│       ├── mod.rs
+│       └── [future transformers]
 │
 ├── logging/                 # Custom tracing layer (core)
 │   └── mod.rs
@@ -128,6 +138,82 @@ src/
 ```
 
 **Note on Current State:** The codebase currently uses `tui/traits/` but the target is conceptually `tui/behaviors/`. Both terms refer to the same concept (traits that define capabilities). The folder name is less important than the pattern: **one file per trait/behavior, organized by feature**.
+
+## Data Pipeline Architecture
+
+The pipeline layer handles persistent storage and search across sessions. Data flows through multiple stages:
+
+```
+Claude Code Request
+        ↓
+┌───────────────────┐
+│  Transformation   │  ← Request transformers (extension)
+│     Pipeline      │    Modify requests before forwarding
+└───────────────────┘
+        ↓
+┌───────────────────┐
+│   Proxy (Axum)    │  ← Core HTTP handling
+│   SSE Streaming   │    Forward immediately, tee for parsing
+└───────────────────┘
+        ↓
+┌───────────────────┐
+│   Parser          │  ← Extract events from SSE stream
+│   Event System    │    Emit to TUI + Storage
+└───────────────────┘
+        ↓
+┌───────────────────┐     ┌───────────────────┐
+│  JSONL Storage    │     │  Lifestats        │
+│  (real-time)      │     │  (SQLite + FTS5)  │
+└───────────────────┘     └───────────────────┘
+                                  ↓
+                          ┌───────────────────┐
+                          │ Embedding Indexer │  ← Background task
+                          │ (vectors for      │    Polls for new content
+                          │  semantic search) │    Batches to provider
+                          └───────────────────┘
+```
+
+### Storage Layers
+
+| Layer | Purpose | Query Tool |
+|-------|---------|------------|
+| **JSONL** | Real-time logs, `jq` analysis, portability | `aspy_search` |
+| **Lifestats (SQLite)** | Lifetime stats, FTS5 full-text search | `aspy_lifestats_*` |
+| **Embeddings (SQLite)** | Vector storage for semantic similarity | `aspy_lifestats_context_hybrid` |
+
+### Embedding Indexer
+
+The `EmbeddingIndexer` runs as a background task with these characteristics:
+
+- **Async poll loop** — Checks for unembedded documents every N seconds (configurable)
+- **Batch processing** — Groups documents to reduce API calls
+- **Provider abstraction** — Supports local (MiniLM) and remote (OpenAI-compatible) providers
+- **Graceful degradation** — If embeddings unavailable, hybrid search falls back to FTS-only
+
+**Provider selection:**
+```toml
+[embeddings]
+provider = "remote"                    # "none" | "local" | "remote"
+model = "text-embedding-3-small"
+api_base = "https://api.openai.com/v1"
+```
+
+### Transformation Pipeline
+
+Request transformers modify outgoing requests before forwarding. Unlike augmentors (which modify responses), transformers operate on the request path:
+
+```rust
+// Example transformer (conceptual)
+pub trait RequestTransformer: Send + Sync {
+    fn transform(&self, request: &mut Request) -> Result<()>;
+    fn is_enabled(&self, config: &Config) -> bool;
+}
+```
+
+**Use cases:**
+- Header injection (add custom headers for tracking)
+- Request logging (capture request bodies)
+- Rate limit enforcement (client-side throttling)
 
 ## Design Principles
 
@@ -496,5 +582,37 @@ The codebase is evolving toward these patterns. When working on existing code:
 - `tui/traits/` → target name is conceptually `tui/behaviors/` (semantically equivalent, folder name is secondary concern)
 - Some components still have state in `app.rs` - migrate as those components are touched
 - Not all panels fully implement behavior traits yet - add as features are enhanced
+- Transformation pipeline is scaffolded but no transformers implemented yet
 
 **AI Agent Note:** When planning refactors, prioritize alignment with these patterns. If existing code violates a pattern, call it out and propose the correct structure. Push toward the target architecture, not just "making it work."
+
+## MCP Server Integration
+
+The MCP server (`mcp-server/`) is a **separate Node.js process** that queries the Rust proxy's REST API. It does NOT share state directly.
+
+```
+┌─────────────────┐     HTTP      ┌─────────────────┐
+│  Claude Code    │  ←─────────→  │   MCP Server    │
+│  (MCP Client)   │               │   (Node.js)     │
+└─────────────────┘               └─────────────────┘
+                                          │
+                                    HTTP  │  REST API
+                                          ↓
+                                  ┌─────────────────┐
+                                  │  Aspy Proxy     │
+                                  │  (Rust)         │
+                                  └─────────────────┘
+```
+
+**Key points:**
+- MCP server is stateless — all data comes from REST API calls
+- Proxy must be running for MCP tools to work
+- MCP tools map 1:1 to REST endpoints (e.g., `aspy_stats` → `GET /api/stats`)
+- Lifestats tools query SQLite directly via proxy API
+
+**MCP tool categories:**
+| Category | Tools | Data Source |
+|----------|-------|-------------|
+| Current session | `aspy_stats`, `aspy_events`, `aspy_context` | Proxy memory |
+| Lifetime search | `aspy_lifestats_*` | SQLite (FTS5 + embeddings) |
+| Real-time logs | `aspy_search` | JSONL files |
