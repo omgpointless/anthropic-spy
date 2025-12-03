@@ -11,7 +11,7 @@
 use crate::events::{ProxyEvent, Stats};
 use crate::proxy::sessions::{EndReason, SessionKey, SessionManager, SessionSource, UserId};
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -1316,6 +1316,144 @@ pub async fn lifestats_stats(
     let stats = query_interface
         .get_lifetime_stats()
         .map_err(|e| ApiError::Internal(format!("Failed to get lifetime stats: {}", e)))?;
+
+    Ok(Json(stats))
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// User-Scoped Lifestats Endpoints (Cross-Session Context Recovery)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/// GET /api/lifestats/search/user/:user_id/thinking - Search thinking blocks for a specific user
+///
+/// Query params:
+///   - q: Search query (required)
+///   - limit: Max results (default: 10, max: 100)
+///   - mode: phrase|natural|raw (default: phrase)
+pub async fn lifestats_search_user_thinking(
+    State(state): State<super::ProxyState>,
+    Path(user_id): Path<String>,
+    Query(params): Query<LifestatsSearchQuery>,
+) -> Result<Json<ThinkingSearchResponse>, ApiError> {
+    let query_interface = state
+        .lifestats_query
+        .as_ref()
+        .ok_or_else(|| ApiError::NotFound("Lifestats query interface not available".to_string()))?;
+
+    let limit = params.limit.min(100);
+    let results = query_interface
+        .search_user_thinking(&user_id, &params.query, limit, params.mode)
+        .map_err(|e| ApiError::Internal(format!("Search failed: {}", e)))?;
+
+    Ok(Json(ThinkingSearchResponse {
+        query: params.query,
+        mode: format!("{:?}", params.mode),
+        results,
+    }))
+}
+
+/// GET /api/lifestats/search/user/:user_id/prompts - Search user prompts for a specific user
+///
+/// Query params:
+///   - q: Search query (required)
+///   - limit: Max results (default: 10, max: 100)
+///   - mode: phrase|natural|raw (default: phrase)
+pub async fn lifestats_search_user_prompts(
+    State(state): State<super::ProxyState>,
+    Path(user_id): Path<String>,
+    Query(params): Query<LifestatsSearchQuery>,
+) -> Result<Json<PromptSearchResponse>, ApiError> {
+    let query_interface = state
+        .lifestats_query
+        .as_ref()
+        .ok_or_else(|| ApiError::NotFound("Lifestats query interface not available".to_string()))?;
+
+    let limit = params.limit.min(100);
+    let results = query_interface
+        .search_user_prompts(&user_id, &params.query, limit, params.mode)
+        .map_err(|e| ApiError::Internal(format!("Search failed: {}", e)))?;
+
+    Ok(Json(PromptSearchResponse {
+        query: params.query,
+        mode: format!("{:?}", params.mode),
+        results,
+    }))
+}
+
+/// GET /api/lifestats/search/user/:user_id/responses - Search assistant responses for a specific user
+///
+/// Query params:
+///   - q: Search query (required)
+///   - limit: Max results (default: 10, max: 100)
+///   - mode: phrase|natural|raw (default: phrase)
+pub async fn lifestats_search_user_responses(
+    State(state): State<super::ProxyState>,
+    Path(user_id): Path<String>,
+    Query(params): Query<LifestatsSearchQuery>,
+) -> Result<Json<ResponseSearchResponse>, ApiError> {
+    let query_interface = state
+        .lifestats_query
+        .as_ref()
+        .ok_or_else(|| ApiError::NotFound("Lifestats query interface not available".to_string()))?;
+
+    let limit = params.limit.min(100);
+    let results = query_interface
+        .search_user_responses(&user_id, &params.query, limit, params.mode)
+        .map_err(|e| ApiError::Internal(format!("Search failed: {}", e)))?;
+
+    Ok(Json(ResponseSearchResponse {
+        query: params.query,
+        mode: format!("{:?}", params.mode),
+        results,
+    }))
+}
+
+/// GET /api/lifestats/context/user/:user_id - Combined context recovery for a specific user
+///
+/// Searches across thinking blocks, user prompts, and assistant responses for a specific user,
+/// then returns combined results sorted by relevance.
+///
+/// Query params:
+///   - topic: Topic to search for (required)
+///   - limit: Max results (default: 10, max: 50)
+///   - mode: phrase|natural|raw (default: phrase)
+pub async fn lifestats_context_user(
+    State(state): State<super::ProxyState>,
+    Path(user_id): Path<String>,
+    Query(params): Query<LifestatsContextQuery>,
+) -> Result<Json<ContextSearchResponse>, ApiError> {
+    let query_interface = state
+        .lifestats_query
+        .as_ref()
+        .ok_or_else(|| ApiError::NotFound("Lifestats query interface not available".to_string()))?;
+
+    let limit = params.limit.min(50);
+    let results = query_interface
+        .recover_user_context(&user_id, &params.topic, limit, params.mode)
+        .map_err(|e| ApiError::Internal(format!("Context recovery failed: {}", e)))?;
+
+    Ok(Json(ContextSearchResponse {
+        topic: params.topic,
+        mode: format!("{:?}", params.mode),
+        results,
+    }))
+}
+
+/// GET /api/lifestats/stats/user/:user_id - Get lifetime statistics for a specific user
+///
+/// Returns aggregated statistics across all sessions belonging to the specified user.
+pub async fn lifestats_stats_user(
+    State(state): State<super::ProxyState>,
+    Path(user_id): Path<String>,
+) -> Result<Json<LifetimeStats>, ApiError> {
+    let query_interface = state
+        .lifestats_query
+        .as_ref()
+        .ok_or_else(|| ApiError::NotFound("Lifestats query interface not available".to_string()))?;
+
+    let stats = query_interface
+        .get_user_lifetime_stats(&user_id)
+        .map_err(|e| ApiError::Internal(format!("Failed to get user lifetime stats: {}", e)))?;
 
     Ok(Json(stats))
 }

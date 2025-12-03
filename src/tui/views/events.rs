@@ -233,16 +233,16 @@ pub(crate) fn format_event_line(event: &ProxyEvent) -> String {
             format!("[{}] 💭 Thinking...", timestamp.format("%H:%M:%S"))
         }
         ProxyEvent::UserPrompt { timestamp, content } => {
-            let preview = if content.len() > 60 {
-                format!("{}...", &content[..60])
+            let preview = if content.chars().count() > 60 {
+                format!("{}...", content.chars().take(60).collect::<String>())
             } else {
                 content.clone()
             };
             format!("[{}] 👤 User: {}", timestamp.format("%H:%M:%S"), preview)
         }
         ProxyEvent::AssistantResponse { timestamp, content } => {
-            let preview = if content.len() > 60 {
-                format!("{}...", &content[..60])
+            let preview = if content.chars().count() > 60 {
+                format!("{}...", content.chars().take(60).collect::<String>())
             } else {
                 content.clone()
             };

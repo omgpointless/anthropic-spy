@@ -268,7 +268,7 @@ impl LifestatsQuery {
 
         // Verify connection works
         let conn = pool.get()?;
-        conn.execute("SELECT 1", [])?;
+        conn.query_row("SELECT 1", [], |row| row.get::<_, i32>(0))?;
 
         Ok(Self { pool })
     }
@@ -493,6 +493,379 @@ impl LifestatsQuery {
 
         Ok(results)
     }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // User-Scoped Queries (Cross-Session Context Recovery)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// Search thinking blocks for a specific user across all their sessions (FTS5)
+    ///
+    /// Uses FTS5 full-text search with BM25 ranking, filtered by user_id.
+    /// Enables queries like "show me all of foundry's past thinking about themes".
+    ///
+    /// # Arguments
+    /// * `user_id` - The user identifier (e.g., "foundry")
+    /// * `query` - The search query
+    /// * `limit` - Maximum number of results
+    /// * `mode` - How to interpret the query (default: Phrase)
+    ///
+    /// # Returns
+    /// Results sorted by relevance (lower rank = more relevant)
+    pub fn search_user_thinking(
+        &self,
+        user_id: &str,
+        query: &str,
+        limit: usize,
+        mode: SearchMode,
+    ) -> anyhow::Result<Vec<ThinkingMatch>> {
+        let conn = self.conn()?;
+        let safe_query = mode.process(query);
+
+        let sql = r#"
+            SELECT
+                t.session_id,
+                t.timestamp,
+                t.content,
+                t.tokens,
+                bm25(thinking_fts) as rank
+            FROM thinking_fts f
+            JOIN thinking_blocks t ON f.rowid = t.id
+            JOIN sessions s ON t.session_id = s.id
+            WHERE thinking_fts MATCH ?1 AND s.user_id = ?2
+            ORDER BY rank
+            LIMIT ?3
+        "#;
+
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map(params![safe_query, user_id, limit as i64], |row| {
+            Ok(ThinkingMatch {
+                session_id: row.get(0)?,
+                timestamp: row.get(1)?,
+                content: row.get(2)?,
+                tokens: row.get(3)?,
+                rank: row.get(4)?,
+            })
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    /// Search user prompts for a specific user across all their sessions (FTS5)
+    ///
+    /// Uses FTS5 full-text search with BM25 ranking, filtered by user_id.
+    ///
+    /// # Arguments
+    /// * `user_id` - The user identifier (e.g., "foundry")
+    /// * `query` - The search query
+    /// * `limit` - Maximum number of results
+    /// * `mode` - How to interpret the query (default: Phrase)
+    ///
+    /// # Returns
+    /// Results sorted by relevance (lower rank = more relevant)
+    pub fn search_user_prompts(
+        &self,
+        user_id: &str,
+        query: &str,
+        limit: usize,
+        mode: SearchMode,
+    ) -> anyhow::Result<Vec<PromptMatch>> {
+        let conn = self.conn()?;
+        let safe_query = mode.process(query);
+
+        let sql = r#"
+            SELECT
+                p.session_id,
+                p.timestamp,
+                p.content,
+                bm25(prompts_fts) as rank
+            FROM prompts_fts f
+            JOIN user_prompts p ON f.rowid = p.id
+            JOIN sessions s ON p.session_id = s.id
+            WHERE prompts_fts MATCH ?1 AND s.user_id = ?2
+            ORDER BY rank
+            LIMIT ?3
+        "#;
+
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map(params![safe_query, user_id, limit as i64], |row| {
+            Ok(PromptMatch {
+                session_id: row.get(0)?,
+                timestamp: row.get(1)?,
+                content: row.get(2)?,
+                rank: row.get(3)?,
+            })
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    /// Search assistant responses for a specific user across all their sessions (FTS5)
+    ///
+    /// Uses FTS5 full-text search with BM25 ranking, filtered by user_id.
+    ///
+    /// # Arguments
+    /// * `user_id` - The user identifier (e.g., "foundry")
+    /// * `query` - The search query
+    /// * `limit` - Maximum number of results
+    /// * `mode` - How to interpret the query (default: Phrase)
+    ///
+    /// # Returns
+    /// Results sorted by relevance (lower rank = more relevant)
+    pub fn search_user_responses(
+        &self,
+        user_id: &str,
+        query: &str,
+        limit: usize,
+        mode: SearchMode,
+    ) -> anyhow::Result<Vec<ResponseMatch>> {
+        let conn = self.conn()?;
+        let safe_query = mode.process(query);
+
+        let sql = r#"
+            SELECT
+                r.session_id,
+                r.timestamp,
+                r.content,
+                bm25(responses_fts) as rank
+            FROM responses_fts f
+            JOIN assistant_responses r ON f.rowid = r.id
+            JOIN sessions s ON r.session_id = s.id
+            WHERE responses_fts MATCH ?1 AND s.user_id = ?2
+            ORDER BY rank
+            LIMIT ?3
+        "#;
+
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map(params![safe_query, user_id, limit as i64], |row| {
+            Ok(ResponseMatch {
+                session_id: row.get(0)?,
+                timestamp: row.get(1)?,
+                content: row.get(2)?,
+                rank: row.get(3)?,
+            })
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    /// Combined context recovery for a specific user across all their sessions
+    ///
+    /// Searches across thinking blocks, user prompts, and assistant responses,
+    /// then combines and sorts by relevance. Only includes data from the specified user's sessions.
+    ///
+    /// # Arguments
+    /// * `user_id` - The user identifier (e.g., "foundry")
+    /// * `topic` - The topic to search for
+    /// * `limit` - Maximum results per source (thinking + prompts + responses)
+    /// * `mode` - How to interpret the query (default: Phrase)
+    ///
+    /// # Returns
+    /// Combined results sorted by BM25 rank (lower = more relevant), limited to `limit` total results.
+    pub fn recover_user_context(
+        &self,
+        user_id: &str,
+        topic: &str,
+        limit: usize,
+        mode: SearchMode,
+    ) -> anyhow::Result<Vec<ContextMatch>> {
+        let mut results = Vec::new();
+
+        // Search thinking blocks
+        for m in self.search_user_thinking(user_id, topic, limit, mode)? {
+            results.push(ContextMatch {
+                match_type: MatchType::Thinking,
+                session_id: m.session_id,
+                timestamp: m.timestamp,
+                content: m.content,
+                rank: m.rank,
+            });
+        }
+
+        // Search user prompts
+        for m in self.search_user_prompts(user_id, topic, limit, mode)? {
+            results.push(ContextMatch {
+                match_type: MatchType::UserPrompt,
+                session_id: m.session_id,
+                timestamp: m.timestamp,
+                content: m.content,
+                rank: m.rank,
+            });
+        }
+
+        // Search assistant responses
+        for m in self.search_user_responses(user_id, topic, limit, mode)? {
+            results.push(ContextMatch {
+                match_type: MatchType::AssistantResponse,
+                session_id: m.session_id,
+                timestamp: m.timestamp,
+                content: m.content,
+                rank: m.rank,
+            });
+        }
+
+        // Sort by rank (lower = more relevant)
+        results.sort_by(|a, b| a.rank.partial_cmp(&b.rank).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Limit total results
+        results.truncate(limit);
+
+        Ok(results)
+    }
+
+    /// Get lifetime statistics for a specific user across all their sessions
+    ///
+    /// Aggregates data across all sessions belonging to the specified user.
+    ///
+    /// # Arguments
+    /// * `user_id` - The user identifier (e.g., "foundry")
+    ///
+    /// # Returns
+    /// Statistics including total tokens, cost, tool calls, and breakdowns by model and tool.
+    pub fn get_user_lifetime_stats(&self, user_id: &str) -> anyhow::Result<LifetimeStats> {
+        let conn = self.conn()?;
+
+        // Aggregate stats from api_usage for this user's sessions
+        let (total_tokens, total_cost): (i64, f64) = conn.query_row(
+            r#"
+            SELECT
+                COALESCE(SUM(a.input_tokens + a.output_tokens + a.cache_read_tokens), 0),
+                COALESCE(SUM(a.cost_usd), 0)
+            FROM api_usage a
+            JOIN sessions s ON a.session_id = s.id
+            WHERE s.user_id = ?1
+            "#,
+            params![user_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+
+        let total_sessions: i64 = conn.query_row(
+            "SELECT COUNT(DISTINCT id) FROM sessions WHERE user_id = ?1",
+            params![user_id],
+            |row| row.get(0),
+        )?;
+
+        let (first_session, last_session): (Option<String>, Option<String>) = conn.query_row(
+            r#"
+            SELECT MIN(a.timestamp), MAX(a.timestamp)
+            FROM api_usage a
+            JOIN sessions s ON a.session_id = s.id
+            WHERE s.user_id = ?1
+            "#,
+            params![user_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+
+        let total_tool_calls: i64 = conn.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM tool_calls t
+            JOIN sessions s ON t.session_id = s.id
+            WHERE s.user_id = ?1
+            "#,
+            params![user_id],
+            |row| row.get(0),
+        )?;
+
+        let total_thinking: i64 = conn.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM thinking_blocks t
+            JOIN sessions s ON t.session_id = s.id
+            WHERE s.user_id = ?1
+            "#,
+            params![user_id],
+            |row| row.get(0),
+        )?;
+
+        // By model
+        let mut by_model = Vec::new();
+        {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT
+                    a.model,
+                    SUM(a.input_tokens + a.output_tokens + a.cache_read_tokens) as tokens,
+                    SUM(a.cost_usd) as cost,
+                    COUNT(*) as calls
+                FROM api_usage a
+                JOIN sessions s ON a.session_id = s.id
+                WHERE s.user_id = ?1
+                GROUP BY a.model
+                ORDER BY tokens DESC
+                "#,
+            )?;
+            let rows = stmt.query_map(params![user_id], |row| {
+                Ok(ModelStats {
+                    model: row.get(0)?,
+                    tokens: row.get(1)?,
+                    cost_usd: row.get(2)?,
+                    calls: row.get(3)?,
+                })
+            })?;
+            for row in rows {
+                by_model.push(row?);
+            }
+        }
+
+        // By tool
+        let mut by_tool = Vec::new();
+        {
+            let mut stmt = conn.prepare(
+                r#"
+                SELECT
+                    tc.tool_name,
+                    COUNT(*) as calls,
+                    COALESCE(AVG(tr.duration_ms), 0) as avg_duration,
+                    COALESCE(AVG(CAST(tr.success AS FLOAT)), 1.0) as success_rate
+                FROM tool_calls tc
+                JOIN sessions s ON tc.session_id = s.id
+                LEFT JOIN tool_results tr ON tc.id = tr.call_id
+                WHERE s.user_id = ?1
+                GROUP BY tc.tool_name
+                ORDER BY calls DESC
+                "#,
+            )?;
+            let rows = stmt.query_map(params![user_id], |row| {
+                Ok(ToolStats {
+                    tool: row.get(0)?,
+                    calls: row.get(1)?,
+                    avg_duration_ms: row.get(2)?,
+                    success_rate: row.get(3)?,
+                })
+            })?;
+            for row in rows {
+                by_tool.push(row?);
+            }
+        }
+
+        Ok(LifetimeStats {
+            total_sessions,
+            total_tokens,
+            total_cost_usd: total_cost,
+            total_tool_calls,
+            total_thinking_blocks: total_thinking,
+            first_session,
+            last_session,
+            by_model,
+            by_tool,
+        })
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    // Global Queries (All Sessions)
+    // ═════════════════════════════════════════════════════════════════════════
 
     /// Get lifetime statistics
     ///

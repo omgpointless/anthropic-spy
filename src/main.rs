@@ -166,7 +166,7 @@ async fn main() -> Result<()> {
     //
     // Precedence: RUST_LOG env var > config file > default "info"
     let default_filter = format!(
-        "anthropic_spy={},tower_http=debug,axum=debug",
+        "aspy={},tower_http=debug,axum=debug",
         config.logging.level
     );
 

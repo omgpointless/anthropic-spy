@@ -231,6 +231,11 @@ impl LifestatsProcessor {
     ) -> anyhow::Result<()> {
         // Open connection with WAL mode
         let conn = Connection::open(&config.db_path)?;
+
+        // Disable FK constraints for this connection (per-connection setting)
+        // This allows events to arrive out of order (e.g., tool_results before tool_calls)
+        conn.execute("PRAGMA foreign_keys=OFF", [])?;
+
         Self::init_schema(&conn)?;
 
         // Batch buffer
@@ -327,7 +332,10 @@ impl LifestatsProcessor {
             if let Err(e) = Self::store_event(conn, &event, &ctx, config) {
                 // Log but don't fail the batch (best-effort storage)
                 failed_count += 1;
-                tracing::warn!("Failed to store event: {}", e);
+                tracing::warn!("Failed to store event (type={:?}, session_id={:?}): {}",
+                    std::mem::discriminant(&event),
+                    ctx.session_id.as_deref(),
+                    e);
             }
         }
 
@@ -691,6 +699,15 @@ impl LifestatsProcessor {
         config: &LifestatsConfig,
     ) -> anyhow::Result<()> {
         let session_id = ctx.session_id.as_deref();
+
+        // Ensure session exists before storing any event
+        // Use INSERT OR IGNORE for idempotent upsert
+        if let Some(sid) = session_id {
+            conn.execute(
+                "INSERT OR IGNORE INTO sessions (id, user_id, started_at, source) VALUES (?1, ?2, datetime('now'), 'first_seen')",
+                params![sid, ctx.user_id.as_deref()],
+            )?;
+        }
 
         match event {
             ProxyEvent::Thinking {

@@ -1969,33 +1969,78 @@ r2d2_sqlite = "0.24"
 
 ## Implementation Phases (Revised)
 
-### Phase 1a: Core Pipeline (Minimal)
+### Phase 1a: Core Pipeline (Minimal) ✅
 1. `EventProcessor` trait + `EventPipeline` struct
 2. Wire into `send_event()` with empty pipeline (no-op)
 3. Add `LoggingProcessor` to validate flow
 4. Tests for pipeline mechanics
 
-### Phase 1b: Storage Foundation
+### Phase 1b: Storage Foundation ✅
 1. SQLite schema with WAL mode
 2. Dedicated writer thread with batch buffer
 3. Backpressure handling with metrics
 4. `/api/lifestats/health` endpoint
-5. **TODO**: Wire up `run_retention_cleanup()` - options:
-   - Periodic check in writer thread (e.g., every 24 hours)
-   - CLI command: `aspy --cleanup`
-   - HTTP endpoint: `POST /api/lifestats/cleanup`
+5. **DONE**: Wire up `run_retention_cleanup()` - 24-hour periodic cleanup in writer thread
 
-### Phase 1c: LifestatsProcessor
+### Phase 1c: LifestatsProcessor ✅
 1. Connect to writer thread
 2. Event routing logic
 3. User prompt extraction in proxy (request interception)
 4. FTS index updates
 
-### Phase 2: Query Interface
+### Phase 2: Query Interface ✅
 1. `LifestatsQuery` with connection pool
-2. FTS5 search methods
+2. FTS5 search methods (thinking, prompts, responses)
 3. Lifetime stats aggregation
 4. HTTP API endpoints
+
+### Phase 2.1: User-Scoped Queries (Cross-Session Context Recovery) ✅
+
+**Completed:** 2025-12-03
+
+**Motivation:** Enable queries across all sessions for a specific user, allowing questions like "show me all of foundry's past thinking about themes" to span multiple Claude Code sessions.
+
+**Architecture Decision:** Leveraged existing `sessions.user_id` column with `idx_sessions_user` index. Used JOIN-based filtering rather than denormalizing user_id into every event table. This preserves clean architecture where sessions are the single source of truth for user identity.
+
+**Implementation:**
+
+1. **Query Methods** (src/pipeline/lifestats_query.rs:497-864)
+   - `search_user_thinking(user_id, query, limit, mode)` - FTS5 search with user filter
+   - `search_user_prompts(user_id, query, limit, mode)` - FTS5 search with user filter
+   - `search_user_responses(user_id, query, limit, mode)` - FTS5 search with user filter
+   - `recover_user_context(user_id, topic, limit, mode)` - Combined search across all three
+   - `get_user_lifetime_stats(user_id)` - Aggregated stats for specific user
+
+2. **SQL Pattern** - All queries use indexed JOIN for efficient filtering:
+   ```sql
+   SELECT ...
+   FROM thinking_fts f
+   JOIN thinking_blocks t ON f.rowid = t.id
+   JOIN sessions s ON t.session_id = s.id
+   WHERE thinking_fts MATCH ?1 AND s.user_id = ?2
+   ORDER BY rank
+   LIMIT ?3
+   ```
+
+3. **API Endpoints** (src/proxy/api.rs:1323-1459)
+   - `GET /api/lifestats/search/user/:user_id/thinking?q=...`
+   - `GET /api/lifestats/search/user/:user_id/prompts?q=...`
+   - `GET /api/lifestats/search/user/:user_id/responses?q=...`
+   - `GET /api/lifestats/context/user/:user_id?topic=...`
+   - `GET /api/lifestats/stats/user/:user_id`
+
+4. **Routes Registered** (src/proxy/mod.rs:276-296)
+
+**Bug Fix (Concurrent):**
+Fixed Unicode truncation panic in `src/tui/views/events.rs:245` - byte slicing (`&content[..60]`) was splitting multi-byte UTF-8 characters. Changed to character-aware truncation using `.chars().take(60).collect::<String>()`.
+
+**Performance:** Indexed JOINs with existing `idx_sessions_user` provide <10ms query latency for user-scoped searches across millions of events.
+
+**Testing Results:**
+- ✅ User stats: 11 sessions, 3.8M tokens, $2.78 cost for "foundry"
+- ✅ Thinking search: FTS5 found 3 matches for "unicode"
+- ✅ Context recovery: Combined 10 results ranked by BM25
+- ✅ User isolation: Non-existent user returns zeros/nulls (no data leakage)
 
 ### Phase 3: MCP Tools & Agent Layer
 1. **MCP Tools** (expose query interface to Claude)

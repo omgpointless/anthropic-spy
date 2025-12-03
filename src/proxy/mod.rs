@@ -273,6 +273,27 @@ pub async fn start_proxy(
             "/api/lifestats/stats",
             axum::routing::get(api::lifestats_stats),
         )
+        // User-scoped lifestats endpoints
+        .route(
+            "/api/lifestats/search/user/:user_id/thinking",
+            axum::routing::get(api::lifestats_search_user_thinking),
+        )
+        .route(
+            "/api/lifestats/search/user/:user_id/prompts",
+            axum::routing::get(api::lifestats_search_user_prompts),
+        )
+        .route(
+            "/api/lifestats/search/user/:user_id/responses",
+            axum::routing::get(api::lifestats_search_user_responses),
+        )
+        .route(
+            "/api/lifestats/context/user/:user_id",
+            axum::routing::get(api::lifestats_context_user),
+        )
+        .route(
+            "/api/lifestats/stats/user/:user_id",
+            axum::routing::get(api::lifestats_stats_user),
+        )
         // Proxy handler (catch-all)
         .route("/*path", any(proxy_handler))
         .with_state(state);
@@ -643,7 +664,7 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
     let streaming_thinking = state.streaming_thinking.clone();
     let context_state = state.context_state.clone();
     let augmentation = state.augmentation.clone();
-    let sessions = state.sessions.clone();
+    let _sessions = state.sessions.clone();
     let user_id_clone = user_id.clone();
 
     // Spawn task to stream response while accumulating
@@ -797,21 +818,12 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
         // Stream complete - now parse and emit events
         let duration = start.elapsed();
 
-        // Helper to send events (includes session recording)
+        // Helper to send events through pipeline (includes session recording, lifestats, etc.)
         let send_event = |event: ProxyEvent| {
-            let tx_tui = event_tx_tui.clone();
-            let tx_storage = event_tx_storage.clone();
-            let sessions_ref = sessions.clone();
+            let state_ref = state.clone();
             let uid = user_id_clone.clone();
             async move {
-                let _ = tx_tui.send(event.clone()).await;
-                let _ = tx_storage.send(event.clone()).await;
-                // Also record to user's session
-                if let Some(ref user_id) = uid {
-                    if let Ok(mut sessions) = sessions_ref.lock() {
-                        sessions.record_event(&sessions::UserId::new(user_id), event);
-                    }
-                }
+                state_ref.send_event(event, uid.as_deref()).await;
             }
         };
 

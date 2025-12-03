@@ -257,6 +257,56 @@
 
 ---
 
+## Phase 2.1: User-Scoped Queries (Cross-Session Context Recovery) ✅
+
+**Goal:** Enable queries across all sessions for a specific user
+
+**Status:** COMPLETE
+**Completed:** 2025-12-03
+**Reviewed By:** Claude Sonnet 4.5
+
+### Query Methods ✅
+- [x] Implement `search_user_thinking(user_id, query, limit, mode)` - lifestats_query.rs:514-555
+- [x] Implement `search_user_prompts(user_id, query, limit, mode)` - lifestats_query.rs:569-608
+- [x] Implement `search_user_responses(user_id, query, limit, mode)` - lifestats_query.rs:622-661
+- [x] Implement `recover_user_context(user_id, topic, limit, mode)` - lifestats_query.rs:676-725
+  - [x] Search across thinking, prompts, and responses for user
+  - [x] Sort by BM25 rank
+  - [x] Limit total results
+- [x] Implement `get_user_lifetime_stats(user_id)` - lifestats_query.rs:736-864
+  - [x] Aggregate tokens, cost, sessions for user
+  - [x] By-model breakdown (tokens, cost, calls)
+  - [x] By-tool breakdown (calls, avg_duration, success_rate)
+
+### HTTP API Endpoints ✅
+- [x] Implement `GET /api/lifestats/search/user/:user_id/thinking?q=...` - api.rs:1333-1353
+- [x] Implement `GET /api/lifestats/search/user/:user_id/prompts?q=...` - api.rs:1361-1381
+- [x] Implement `GET /api/lifestats/search/user/:user_id/responses?q=...` - api.rs:1389-1409
+- [x] Implement `GET /api/lifestats/context/user/:user_id?topic=...` - api.rs:1420-1440
+- [x] Implement `GET /api/lifestats/stats/user/:user_id` - api.rs:1445-1459
+- [x] Add routes to proxy router - proxy/mod.rs:277-296
+- [x] Import Path extractor from axum - api.rs:14
+
+### Architecture Quality ✅
+- [x] Used indexed JOIN pattern (sessions.user_id with idx_sessions_user)
+- [x] Zero denormalization (sessions remain source of truth)
+- [x] FTS5 ranking preserved through JOIN
+- [x] User isolation verified (non-existent user → zeros/nulls)
+
+### Bug Fixes ✅
+- [x] Fix Unicode truncation panic in events.rs:245
+  - [x] Changed from byte slicing to character-aware (.chars().take(60))
+  - [x] Applied to both UserPrompt and AssistantResponse formatting
+
+### Testing Results ✅
+- [x] User stats endpoint: 11 sessions, 3.8M tokens, $2.78 cost
+- [x] Thinking search: 3 matches for "unicode" keyword
+- [x] Context recovery: 10 combined results (6 responses, 2 thinking, 2 prompts)
+- [x] User isolation: Non-existent user returns empty stats
+- [x] Compilation: Zero warnings
+
+---
+
 ## Phase 3: MCP Tools & Agent Layer
 
 **Goal:** Claude-accessible context recovery via MCP
