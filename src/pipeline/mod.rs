@@ -45,8 +45,7 @@ pub enum ProcessResult {
 ///
 /// Uses `Arc<str>` for cheap cloning - processor side-effects often need
 /// to clone context for async operations, and Arc clone is just a refcount bump.
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ProcessContext {
     /// Current session ID (if known)
     pub session_id: Option<Arc<str>>,
@@ -67,7 +66,6 @@ impl ProcessContext {
         }
     }
 }
-
 
 /// Trait for event processors
 ///
