@@ -121,6 +121,33 @@ impl Default for LoggingConfig {
     }
 }
 
+/// API translation settings
+///
+/// Enables bidirectional translation between OpenAI and Anthropic API formats.
+/// When enabled, the proxy can accept OpenAI-formatted requests, translate them
+/// to Anthropic format, and translate responses back to OpenAI format.
+#[derive(Debug, Clone)]
+pub struct Translation {
+    /// Whether API translation is enabled
+    pub enabled: bool,
+
+    /// Auto-detect format from path/headers/body (recommended)
+    pub auto_detect: bool,
+
+    /// Model name mappings (OpenAI model -> Anthropic model)
+    pub model_mapping: HashMap<String, String>,
+}
+
+impl Default for Translation {
+    fn default() -> Self {
+        Self {
+            enabled: false, // Opt-in feature
+            auto_detect: true,
+            model_mapping: HashMap::new(), // Use built-in defaults
+        }
+    }
+}
+
 /// Lifetime statistics storage configuration
 #[derive(Debug, Clone)]
 pub struct LifestatsConfig {
@@ -296,6 +323,9 @@ pub struct Config {
     /// Embeddings configuration for semantic search
     pub embeddings: EmbeddingsConfig,
 
+    /// API translation settings (OpenAI ↔ Anthropic)
+    pub translation: Translation,
+
     /// Client and provider configuration for multi-user routing
     pub clients: ClientsConfig,
 }
@@ -348,6 +378,14 @@ struct FileEmbeddingsConfig {
     max_content_length: Option<usize>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct FileTranslation {
+    enabled: Option<bool>,
+    auto_detect: Option<bool>,
+    #[serde(default)]
+    model_mapping: HashMap<String, String>,
+}
+
 /// Config file structure (subset of Config that makes sense to persist)
 #[derive(Debug, Deserialize, Default)]
 struct FileConfig {
@@ -373,6 +411,9 @@ struct FileConfig {
 
     /// Optional [embeddings] section
     embeddings: Option<FileEmbeddingsConfig>,
+
+    /// Optional [translation] section
+    translation: Option<FileTranslation>,
 
     /// Optional [clients.X] sections for multi-user routing
     #[serde(default)]
@@ -561,6 +602,26 @@ batch_delay_ms = {embed_batch_delay}
 max_content_length = {embed_max_content}
 
 # ─────────────────────────────────────────────────────────────────────────────
+# API TRANSLATION (Optional - OpenAI ↔ Anthropic)
+# ─────────────────────────────────────────────────────────────────────────────
+# Enable bidirectional translation between OpenAI and Anthropic API formats.
+# When enabled, the proxy can accept OpenAI-formatted requests (/v1/chat/completions),
+# translate them to Anthropic format, and translate responses back.
+#
+# Use case: Run OpenAI-compatible tools through Anthropic's API.
+
+[translation]
+enabled = {translation_enabled}
+auto_detect = {translation_auto_detect}
+
+# Model mappings (OpenAI model -> Anthropic model)
+# Uncomment and customize as needed. Built-in defaults handle common models.
+# [translation.model_mapping]
+# "gpt-4" = "claude-sonnet-4-20250514"
+# "gpt-4-turbo" = "claude-sonnet-4-20250514"
+# "gpt-3.5-turbo" = "claude-3-haiku-20240307"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # MULTI-CLIENT ROUTING (Optional)
 # ─────────────────────────────────────────────────────────────────────────────
 # Track multiple Claude Code instances through a single proxy using named clients.
@@ -595,6 +656,8 @@ max_content_length = {embed_max_content}
             lifestats_channel_buffer = self.lifestats.channel_buffer,
             lifestats_batch_size = self.lifestats.batch_size,
             lifestats_flush_interval_secs = self.lifestats.flush_interval_secs,
+            translation_enabled = self.translation.enabled,
+            translation_auto_detect = self.translation.auto_detect,
             embed_provider = self.embeddings.provider,
             embed_model = self.embeddings.model,
             embed_poll_interval = self.embeddings.poll_interval_secs,
@@ -757,6 +820,23 @@ max_content_length = {embed_max_content}
                 .unwrap_or(embed_defaults.max_content_length),
         };
 
+        // Translation settings: file config only
+        let file_translation = file.translation.unwrap_or_default();
+        let translation_defaults = Translation::default();
+        let translation = Translation {
+            enabled: file_translation
+                .enabled
+                .unwrap_or(translation_defaults.enabled),
+            auto_detect: file_translation
+                .auto_detect
+                .unwrap_or(translation_defaults.auto_detect),
+            model_mapping: if file_translation.model_mapping.is_empty() {
+                translation_defaults.model_mapping
+            } else {
+                file_translation.model_mapping
+            },
+        };
+
         // Client/provider config: file only
         let clients = ClientsConfig {
             clients: file.clients,
@@ -787,6 +867,7 @@ max_content_length = {embed_max_content}
             logging,
             lifestats,
             embeddings,
+            translation,
             clients,
         }
     }
@@ -809,6 +890,7 @@ impl Default for Config {
             logging: LoggingConfig::default(),
             lifestats: LifestatsConfig::default(),
             embeddings: EmbeddingsConfig::default(),
+            translation: Translation::default(),
             clients: ClientsConfig::default(),
         }
     }
