@@ -418,7 +418,9 @@ impl LifestatsProcessor {
         if current_version < 2 {
             Self::migrate_v1_to_v2(conn)?;
         }
-        // Future: if current_version < 3 { Self::migrate_v2_to_v3(conn)?; }
+        if current_version < 3 {
+            Self::migrate_v2_to_v3(conn)?;
+        }
 
         Ok(())
     }
@@ -589,6 +591,44 @@ impl LifestatsProcessor {
         )?;
 
         tracing::info!("Migrated lifestats database from v1 to v2");
+        Ok(())
+    }
+
+    /// Migration from v2 to v3 (adds is_rejection column to tool_results)
+    ///
+    /// This distinguishes user rejections from actual errors. The column is
+    /// populated at write time using `is_user_rejection()` pattern matching.
+    fn migrate_v2_to_v3(conn: &Connection) -> anyhow::Result<()> {
+        // Check if column already exists (idempotent)
+        let has_column: bool = conn.query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('tool_results') WHERE name='is_rejection'",
+            [],
+            |row| row.get(0),
+        )?;
+
+        if !has_column {
+            conn.execute(
+                "ALTER TABLE tool_results ADD COLUMN is_rejection INTEGER DEFAULT 0",
+                [],
+            )?;
+
+            // Backfill existing rejections based on known patterns
+            conn.execute(
+                r#"UPDATE tool_results SET is_rejection = 1
+                   WHERE success = 0 AND (
+                       output_json LIKE '%The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file)%'
+                       OR output_json LIKE '%The user doesn''t want to take this action right now%'
+                   )"#,
+                [],
+            )?;
+        }
+
+        conn.execute(
+            "UPDATE metadata SET value = '3' WHERE key = 'schema_version'",
+            [],
+        )?;
+
+        tracing::info!("Migrated lifestats database from v2 to v3 (added is_rejection)");
         Ok(())
     }
 
