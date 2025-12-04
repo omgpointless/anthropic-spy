@@ -572,8 +572,38 @@ async fn proxy_handler(
     {
         if let Ok(body_json) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
             let model = body_json.get("model").and_then(|m| m.as_str());
-            let ctx =
+            let mut ctx =
                 transformation::TransformContext::new(user_id.as_deref(), &routing.api_path, model);
+
+            // Extract turn_number and tool_result_count for conditional rules
+            if let Some(messages) = body_json.get("messages").and_then(|m| m.as_array()) {
+                // Turn number = count of user messages
+                let turn_number = messages
+                    .iter()
+                    .filter(|msg| msg.get("role").and_then(|r| r.as_str()) == Some("user"))
+                    .count() as u64;
+                ctx.turn_number = Some(turn_number);
+
+                // Tool result count = count in last user message
+                if let Some(last_user) = messages
+                    .iter()
+                    .rev()
+                    .find(|msg| msg.get("role").and_then(|r| r.as_str()) == Some("user"))
+                {
+                    let tool_results = last_user
+                        .get("content")
+                        .and_then(|c| c.as_array())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter(|b| {
+                                    b.get("type").and_then(|t| t.as_str()) == Some("tool_result")
+                                })
+                                .count()
+                        })
+                        .unwrap_or(0);
+                    ctx.tool_result_count = Some(tool_results);
+                }
+            }
 
             match state.transformation.transform(&body_json, &ctx) {
                 transformation::TransformResult::Modified(new_body) => {

@@ -11,11 +11,108 @@
 //! - **Remove**: Filter out blocks matching a regex pattern
 //! - **Replace**: Modify content within matching blocks
 //! - **Inject**: Add new blocks at specified positions
+//!
+//! # Conditions
+//!
+//! Rules can have optional `when` conditions that must be met for the rule to apply:
+//! - `turn_number`: Match on conversation turn (e.g., "=1", ">5", "every:3")
+//! - `has_tool_results`: Match on tool result count (e.g., ">0", "=0")
+//! - `client_id`: Match on client ID (e.g., "dev-1", "foundry|local")
 
 use super::{RequestTransformer, TransformContext, TransformResult};
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
+
+// ============================================================================
+// Condition Types
+// ============================================================================
+
+/// Conditions that must be met for a rule to apply
+///
+/// Multiple conditions in the same WhenCondition are AND'd together.
+/// Pipe-separated values within a condition are OR'd (e.g., "dev-1|foundry").
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct WhenCondition {
+    /// Turn number condition: "=1", ">5", "<10", "every:3"
+    #[serde(default)]
+    pub turn_number: Option<String>,
+
+    /// Tool results condition: ">0", "=0", ">3"
+    #[serde(default)]
+    pub has_tool_results: Option<String>,
+
+    /// Client ID condition: "dev-1", "foundry|local" (pipe = OR)
+    #[serde(default)]
+    pub client_id: Option<String>,
+}
+
+impl WhenCondition {
+    /// Check if all conditions are met
+    pub fn evaluate(&self, ctx: &TransformContext) -> bool {
+        self.check_turn_number(ctx) && self.check_tool_results(ctx) && self.check_client_id(ctx)
+    }
+
+    fn check_turn_number(&self, ctx: &TransformContext) -> bool {
+        let Some(ref condition) = self.turn_number else {
+            return true;
+        };
+        let Some(turn) = ctx.turn_number else {
+            return true; // No turn info = pass (permissive)
+        };
+        parse_numeric_condition(condition, turn)
+    }
+
+    fn check_tool_results(&self, ctx: &TransformContext) -> bool {
+        let Some(ref condition) = self.has_tool_results else {
+            return true;
+        };
+        let count = ctx.tool_result_count.unwrap_or(0) as u64;
+        parse_numeric_condition(condition, count)
+    }
+
+    fn check_client_id(&self, ctx: &TransformContext) -> bool {
+        let Some(ref condition) = self.client_id else {
+            return true;
+        };
+        let Some(client) = ctx.client_id else {
+            return true;
+        };
+        // Pipe-separated = OR
+        condition.split('|').any(|c| c.trim() == client)
+    }
+}
+
+/// Parse numeric conditions like "=1", ">5", "<10", "every:3"
+fn parse_numeric_condition(condition: &str, value: u64) -> bool {
+    let condition = condition.trim();
+
+    if let Some(n) = condition.strip_prefix("every:") {
+        if let Ok(interval) = n.parse::<u64>() {
+            return interval > 0 && value.is_multiple_of(interval);
+        }
+        return true; // Invalid = pass
+    }
+
+    if let Some(n) = condition.strip_prefix(">=") {
+        return n.parse::<u64>().map(|n| value >= n).unwrap_or(true);
+    }
+    if let Some(n) = condition.strip_prefix("<=") {
+        return n.parse::<u64>().map(|n| value <= n).unwrap_or(true);
+    }
+    if let Some(n) = condition.strip_prefix('>') {
+        return n.parse::<u64>().map(|n| value > n).unwrap_or(true);
+    }
+    if let Some(n) = condition.strip_prefix('<') {
+        return n.parse::<u64>().map(|n| value < n).unwrap_or(true);
+    }
+    if let Some(n) = condition.strip_prefix('=') {
+        return n.parse::<u64>().map(|n| value == n).unwrap_or(true);
+    }
+
+    // Plain number = equals
+    condition.parse::<u64>().map(|n| value == n).unwrap_or(true)
+}
 
 // ============================================================================
 // Rule Types
@@ -45,6 +142,8 @@ pub enum TagRule {
         content: String,
         /// Where to inject
         position: InjectPosition,
+        /// Optional conditions for when this rule applies
+        when: Option<WhenCondition>,
     },
     /// Remove all blocks matching pattern
     Remove {
@@ -52,6 +151,8 @@ pub enum TagRule {
         tag: String,
         /// Regex to match against block content
         pattern: Regex,
+        /// Optional conditions for when this rule applies
+        when: Option<WhenCondition>,
     },
     /// Replace content within matching blocks
     Replace {
@@ -61,6 +162,8 @@ pub enum TagRule {
         pattern: Regex,
         /// Replacement string (supports $1, $2 capture groups)
         replacement: String,
+        /// Optional conditions for when this rule applies
+        when: Option<WhenCondition>,
     },
 }
 
@@ -78,17 +181,26 @@ pub enum RuleConfig {
         content: String,
         #[serde(default = "default_position")]
         position: PositionConfig,
+        /// Optional conditions for when this rule applies
+        #[serde(default)]
+        when: Option<WhenCondition>,
     },
     Remove {
         /// Which XML tag this rule targets
         tag: String,
         pattern: String,
+        /// Optional conditions for when this rule applies
+        #[serde(default)]
+        when: Option<WhenCondition>,
     },
     Replace {
         /// Which XML tag this rule targets
         tag: String,
         pattern: String,
         replacement: String,
+        /// Optional conditions for when this rule applies
+        #[serde(default)]
+        when: Option<WhenCondition>,
     },
 }
 
@@ -152,6 +264,7 @@ impl TagEditor {
                     tag,
                     content,
                     position,
+                    when,
                 } => {
                     let pos = match position {
                         PositionConfig::Start => InjectPosition::Start,
@@ -167,20 +280,24 @@ impl TagEditor {
                         tag: tag.clone(),
                         content: content.clone(),
                         position: pos,
+                        when: when.clone(),
                     }
                 }
-                RuleConfig::Remove { tag, pattern } => TagRule::Remove {
+                RuleConfig::Remove { tag, pattern, when } => TagRule::Remove {
                     tag: tag.clone(),
                     pattern: Regex::new(pattern)?,
+                    when: when.clone(),
                 },
                 RuleConfig::Replace {
                     tag,
                     pattern,
                     replacement,
+                    when,
                 } => TagRule::Replace {
                     tag: tag.clone(),
                     pattern: Regex::new(pattern)?,
                     replacement: replacement.clone(),
+                    when: when.clone(),
                 },
             };
             rules.push(rule);
@@ -219,7 +336,11 @@ impl TagEditor {
 
     /// Apply only Remove and Replace rules (not Inject)
     /// Used for non-last text blocks to clean up reminders without adding new ones
-    fn apply_rules_remove_replace_only(&self, content: &str) -> Option<String> {
+    fn apply_rules_remove_replace_only(
+        &self,
+        content: &str,
+        ctx: &TransformContext,
+    ) -> Option<String> {
         let mut modified = false;
         let mut result = content.to_string();
         let tags = self.collect_tags();
@@ -227,7 +348,13 @@ impl TagEditor {
 
         // Apply Remove rules (only to blocks matching the rule's tag)
         for rule in &self.rules {
-            if let TagRule::Remove { tag, pattern } = rule {
+            if let TagRule::Remove { tag, pattern, when } = rule {
+                // Check conditions
+                if let Some(ref cond) = when {
+                    if !cond.evaluate(ctx) {
+                        continue;
+                    }
+                }
                 let before_len = blocks.len();
                 blocks.retain(|b| !(b.tag == *tag && pattern.is_match(&b.content)));
                 if blocks.len() != before_len {
@@ -242,8 +369,15 @@ impl TagEditor {
                 tag,
                 pattern,
                 replacement,
+                when,
             } = rule
             {
+                // Check conditions
+                if let Some(ref cond) = when {
+                    if !cond.evaluate(ctx) {
+                        continue;
+                    }
+                }
                 for block in &mut blocks {
                     if block.tag == *tag && pattern.is_match(&block.content) {
                         let new_content = pattern.replace_all(&block.content, replacement);
@@ -271,7 +405,7 @@ impl TagEditor {
     }
 
     /// Apply all rules to the given text content
-    fn apply_rules(&self, content: &str) -> Option<String> {
+    fn apply_rules(&self, content: &str, ctx: &TransformContext) -> Option<String> {
         let mut modified = false;
         let mut result = content.to_string();
         let tags = self.collect_tags();
@@ -281,7 +415,13 @@ impl TagEditor {
 
         // Apply Remove rules first (only to blocks matching the rule's tag)
         for rule in &self.rules {
-            if let TagRule::Remove { tag, pattern } = rule {
+            if let TagRule::Remove { tag, pattern, when } = rule {
+                // Check conditions
+                if let Some(ref cond) = when {
+                    if !cond.evaluate(ctx) {
+                        continue;
+                    }
+                }
                 let before_len = blocks.len();
                 blocks.retain(|b| !(b.tag == *tag && pattern.is_match(&b.content)));
                 if blocks.len() != before_len {
@@ -296,8 +436,15 @@ impl TagEditor {
                 tag,
                 pattern,
                 replacement,
+                when,
             } = rule
             {
+                // Check conditions
+                if let Some(ref cond) = when {
+                    if !cond.evaluate(ctx) {
+                        continue;
+                    }
+                }
                 for block in &mut blocks {
                     if block.tag == *tag && pattern.is_match(&block.content) {
                         let new_content = pattern.replace_all(&block.content, replacement);
@@ -316,8 +463,15 @@ impl TagEditor {
                 tag,
                 content,
                 position,
+                when,
             } = rule
             {
+                // Check conditions
+                if let Some(ref cond) = when {
+                    if !cond.evaluate(ctx) {
+                        continue;
+                    }
+                }
                 let new_block = TaggedBlock {
                     content: content.clone(),
                     tag: tag.clone(),
@@ -376,7 +530,7 @@ impl RequestTransformer for TagEditor {
         ctx.path.ends_with("/messages") || ctx.path.ends_with("/v1/messages")
     }
 
-    fn transform(&self, body: &Value, _ctx: &TransformContext) -> TransformResult {
+    fn transform(&self, body: &Value, ctx: &TransformContext) -> TransformResult {
         if self.rules.is_empty() {
             return TransformResult::Unchanged;
         }
@@ -440,7 +594,7 @@ impl RequestTransformer for TagEditor {
                     .as_str()
                     .unwrap_or("")
                     .to_string();
-                if let Some(new_text) = self.apply_rules(&original) {
+                if let Some(new_text) = self.apply_rules(&original, ctx) {
                     if new_text.trim().is_empty() {
                         // Empty string content: use minimal valid content
                         // (Can't delete the message, so use single space as fallback)
@@ -471,9 +625,9 @@ impl RequestTransformer for TagEditor {
                         if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
                             let is_last = Some(idx) == last_text_idx;
                             let new_text = if is_last {
-                                self.apply_rules(text)
+                                self.apply_rules(text, ctx)
                             } else {
-                                self.apply_rules_remove_replace_only(text)
+                                self.apply_rules_remove_replace_only(text, ctx)
                             };
                             if let Some(new_text) = new_text {
                                 // If text is empty after transformation, mark for deletion
@@ -499,7 +653,7 @@ impl RequestTransformer for TagEditor {
 
                 // If no text blocks but we have Inject rules, append one
                 if text_block_indices.is_empty() && self.has_inject_rules() {
-                    if let Some(new_text) = self.apply_rules("") {
+                    if let Some(new_text) = self.apply_rules("", ctx) {
                         content_arr.push(serde_json::json!({
                             "type": "text",
                             "text": new_text
@@ -549,13 +703,22 @@ fn parse_tagged_blocks(text: &str, tags: &[String]) -> Vec<TaggedBlock> {
         let close_tag = format!("</{}>", tag);
         let mut search_start = 0;
 
-        while let Some(start) = text[search_start..].find(&open_tag) {
+        while let Some(slice) = text.get(search_start..) {
+            let Some(start) = slice.find(&open_tag) else {
+                break;
+            };
             let abs_start = search_start + start;
             let after_tag = abs_start + open_tag.len();
 
-            if let Some(end_offset) = text[after_tag..].find(&close_tag) {
+            let Some(search_slice) = text.get(after_tag..) else {
+                break;
+            };
+
+            if let Some(end_offset) = search_slice.find(&close_tag) {
                 let abs_end = after_tag + end_offset + close_tag.len();
-                let inner_content = &text[after_tag..after_tag + end_offset];
+                let inner_content = text
+                    .get(after_tag..after_tag + end_offset)
+                    .unwrap_or_default();
 
                 blocks.push(TaggedBlock {
                     content: inner_content.trim().to_string(),
@@ -588,13 +751,17 @@ fn remove_all_tagged_blocks(text: &str, tags: &[String]) -> String {
     let mut last_end = 0;
 
     for block in &blocks {
-        // Add text before this block
-        result.push_str(&text[last_end..block.original_start]);
+        // Add text before this block (use get() for UTF-8 safety)
+        if let Some(before) = text.get(last_end..block.original_start) {
+            result.push_str(before);
+        }
         last_end = block.original_end;
     }
 
     // Add remaining text after last block
-    result.push_str(&text[last_end..]);
+    if let Some(after) = text.get(last_end..) {
+        result.push_str(after);
+    }
 
     // Clean up extra newlines
     let result = result

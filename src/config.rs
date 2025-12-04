@@ -852,6 +852,7 @@ impl Config {
                     tag,
                     content,
                     position,
+                    when,
                 } => {
                     output.push_str("type = \"inject\"\n");
                     output.push_str(&format!("tag = \"{}\"\n", tag));
@@ -881,21 +882,59 @@ impl Config {
                             ));
                         }
                     }
+                    // Output when condition if present
+                    if let Some(cond) = when {
+                        output.push_str("[transformers.tag-editor.rules.when]\n");
+                        if let Some(ref tn) = cond.turn_number {
+                            output.push_str(&format!("turn_number = \"{}\"\n", tn));
+                        }
+                        if let Some(ref tr) = cond.has_tool_results {
+                            output.push_str(&format!("has_tool_results = \"{}\"\n", tr));
+                        }
+                        if let Some(ref ci) = cond.client_id {
+                            output.push_str(&format!("client_id = \"{}\"\n", ci));
+                        }
+                    }
                 }
-                RuleConfig::Remove { tag, pattern } => {
+                RuleConfig::Remove { tag, pattern, when } => {
                     output.push_str("type = \"remove\"\n");
                     output.push_str(&format!("tag = \"{}\"\n", tag));
                     output.push_str(&format!("pattern = \"{}\"\n", pattern));
+                    if let Some(cond) = when {
+                        output.push_str("[transformers.tag-editor.rules.when]\n");
+                        if let Some(ref tn) = cond.turn_number {
+                            output.push_str(&format!("turn_number = \"{}\"\n", tn));
+                        }
+                        if let Some(ref tr) = cond.has_tool_results {
+                            output.push_str(&format!("has_tool_results = \"{}\"\n", tr));
+                        }
+                        if let Some(ref ci) = cond.client_id {
+                            output.push_str(&format!("client_id = \"{}\"\n", ci));
+                        }
+                    }
                 }
                 RuleConfig::Replace {
                     tag,
                     pattern,
                     replacement,
+                    when,
                 } => {
                     output.push_str("type = \"replace\"\n");
                     output.push_str(&format!("tag = \"{}\"\n", tag));
                     output.push_str(&format!("pattern = \"{}\"\n", pattern));
                     output.push_str(&format!("replacement = \"{}\"\n", replacement));
+                    if let Some(cond) = when {
+                        output.push_str("[transformers.tag-editor.rules.when]\n");
+                        if let Some(ref tn) = cond.turn_number {
+                            output.push_str(&format!("turn_number = \"{}\"\n", tn));
+                        }
+                        if let Some(ref tr) = cond.has_tool_results {
+                            output.push_str(&format!("has_tool_results = \"{}\"\n", tr));
+                        }
+                        if let Some(ref ci) = cond.client_id {
+                            output.push_str(&format!("client_id = \"{}\"\n", ci));
+                        }
+                    }
                 }
             }
         }

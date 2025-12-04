@@ -85,8 +85,7 @@ pub enum TransformResult {
 #[derive(Debug, Clone, Default)]
 pub struct TransformContext<'a> {
     /// Client ID from routing (e.g., "dev-1")
-    /// Used by: per-client transformation rules (future)
-    #[allow(dead_code)]
+    /// Used by: per-client transformation rules, client_id condition
     pub client_id: Option<&'a str>,
 
     /// Request path (e.g., "/v1/messages")
@@ -106,6 +105,14 @@ pub struct TransformContext<'a> {
     /// Used by: ContextEnricher for context-aware injection (future)
     #[allow(dead_code)]
     pub context_limit: Option<u64>,
+
+    /// Turn number in the conversation (1-indexed, counts user messages)
+    /// Used by: turn_number condition for frequency-based rules
+    pub turn_number: Option<u64>,
+
+    /// Number of tool_result blocks in current user message
+    /// Used by: has_tool_results condition
+    pub tool_result_count: Option<usize>,
     // Future: semantic_context for RAG injection
     // pub semantic_context: Option<&'a SemanticContext>,
 }
@@ -119,6 +126,8 @@ impl<'a> TransformContext<'a> {
             model,
             context_tokens: None,
             context_limit: None,
+            turn_number: None,
+            tool_result_count: None,
         }
     }
 
