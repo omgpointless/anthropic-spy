@@ -345,28 +345,31 @@ pub(crate) fn format_event_line(tracked: &TrackedEvent) -> String {
 
 /// Format tracking metadata as a small header section
 ///
-/// Shows user_id and session_id when present, for observability.
+/// Shows user_id and session_id stacked vertically.
+/// Session uses lighter formatting (italics) to be less prominent.
 fn format_tracking_header(tracked: &TrackedEvent) -> String {
-    let mut parts = Vec::new();
+    let mut lines = Vec::new();
 
     if let Some(ref user_id) = tracked.user_id {
-        parts.push(format!("**User:** @{}", user_id));
+        lines.push(format!("**User:** @{}", user_id));
     }
 
     if let Some(ref session_id) = tracked.session_id {
-        // Show truncated session_id (first 8 chars) with full in parens
-        let short = if session_id.len() > 8 {
-            &session_id[..8]
+        // Show truncated session_id (first 16 chars) for readability
+        // Implicit sessions (~user-xxxx) are ~13 chars, explicit UUIDs are longer
+        let short = if session_id.len() > 16 {
+            &session_id[..16]
         } else {
             session_id
         };
-        parts.push(format!("**Session:** `{}`", short));
+        // Italics for secondary info (session is less important than user)
+        lines.push(format!("*Session: {}*", short));
     }
 
-    if parts.is_empty() {
+    if lines.is_empty() {
         String::new()
     } else {
-        format!("{}\n\n", parts.join("  "))
+        format!("{}\n\n", lines.join("\n"))
     }
 }
 

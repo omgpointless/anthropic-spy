@@ -5,6 +5,7 @@
 use super::formatters::format_compact_number;
 use crate::tui::app::App;
 use crate::tui::layout::Breakpoint;
+use ratatui::prelude::Alignment;
 use ratatui::{
     layout::Rect,
     style::Style,
@@ -92,9 +93,19 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         )
     };
 
+    // Get contextual keybind hints for focused component
+    let hint = app.focus_hint().unwrap_or("?:help  q:quit");
+
     let status = Paragraph::new(status_text)
         .style(Style::default().fg(app.theme.status_bar))
-        .block(Block::default().borders(Borders::TOP));
+        .block(
+            Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(app.theme.border))
+                .title_alignment(Alignment::Center)
+                .title_style(Style::default().fg(app.theme.muted))
+                .title(hint),
+        );
 
     f.render_widget(status, area);
 }

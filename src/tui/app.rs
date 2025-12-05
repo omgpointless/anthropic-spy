@@ -773,6 +773,29 @@ impl App {
         format!("{:02}:{:02}:{:02}", hours, minutes, secs)
     }
 
+    /// Get the focus hint for the currently focused component
+    ///
+    /// Returns keybind hints specific to the focused panel/view.
+    /// Used by the status bar to show contextual help.
+    pub fn focus_hint(&self) -> Option<&'static str> {
+        // Settings view has its own focus handling
+        if self.view == View::Settings {
+            return self.settings_panel.focus_hint();
+        }
+
+        // Modal captures focus when open
+        if self.modal.is_some() {
+            return self.detail_panel.focus_hint();
+        }
+
+        // Otherwise, return hint for focused panel
+        match self.focused {
+            FocusablePanel::Events => self.events_panel.focus_hint(),
+            FocusablePanel::Thinking => self.thinking_panel.focus_hint(),
+            FocusablePanel::Logs => self.logs_panel.focus_hint(),
+        }
+    }
+
     /// Extract topic info from a Haiku response body
     fn extract_topic_from_response(body: &Option<serde_json::Value>) -> Option<TopicInfo> {
         let body = body.as_ref()?;

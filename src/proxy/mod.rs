@@ -52,37 +52,42 @@ const MAX_REQUEST_BODY_SIZE: usize = 50 * 1024 * 1024;
 ///
 /// Finds the last user message in the messages array and returns its content.
 /// Handles both string and array (multipart) content formats.
+/// Only extracts from the LAST user message - does not fall back to earlier messages.
 fn extract_user_prompt(body: &serde_json::Value) -> Option<String> {
     // Get the messages array
     let messages = body.get("messages")?.as_array()?;
 
     // Find the last user message (iterate in reverse)
-    for message in messages.iter().rev() {
-        if message.get("role")?.as_str()? == "user" {
-            // Handle both string and array content formats
-            match message.get("content")? {
-                serde_json::Value::String(s) => return Some(s.clone()),
-                serde_json::Value::Array(parts) => {
-                    // Concatenate text parts
-                    let text: Vec<&str> = parts
-                        .iter()
-                        .filter_map(|p| {
-                            if p.get("type")?.as_str()? == "text" {
-                                p.get("text")?.as_str()
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                    if !text.is_empty() {
-                        return Some(text.join("\n"));
+    let last_user = messages
+        .iter()
+        .rev()
+        .find(|msg| msg.get("role").and_then(|r| r.as_str()) == Some("user"))?;
+
+    // Handle both string and array content formats
+    match last_user.get("content")? {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Array(parts) => {
+            // Concatenate text parts
+            let text: Vec<&str> = parts
+                .iter()
+                .filter_map(|p| {
+                    if p.get("type")?.as_str()? == "text" {
+                        p.get("text")?.as_str()
+                    } else {
+                        None
                     }
-                }
-                _ => {}
+                })
+                .collect();
+            if !text.is_empty() {
+                Some(text.join("\n"))
+            } else {
+                // Last user message has no text blocks (only tool_result, etc.)
+                // Don't fall back to earlier messages - return None
+                None
             }
         }
+        _ => None,
     }
-    None
 }
 
 /// Shared state for the proxy server
@@ -486,7 +491,7 @@ fn extract_client_routing(
             "/".to_string()
         };
 
-        tracing::debug!(
+        tracing::trace!(
             "Client routing: '{}' -> base_url='{}', api_path='{}'",
             potential_client_id,
             base_url,
@@ -575,33 +580,54 @@ async fn proxy_handler(
             let mut ctx =
                 transformation::TransformContext::new(user_id.as_deref(), &routing.api_path, model);
 
-            // Extract turn_number and tool_result_count for conditional rules
+            // Extract tool_result_count and compute session turn_number
             if let Some(messages) = body_json.get("messages").and_then(|m| m.as_array()) {
-                // Turn number = count of user messages
-                let turn_number = messages
-                    .iter()
-                    .filter(|msg| msg.get("role").and_then(|r| r.as_str()) == Some("user"))
-                    .count() as u64;
-                ctx.turn_number = Some(turn_number);
-
                 // Tool result count = count in last user message
-                if let Some(last_user) = messages
+                let tool_results = messages
                     .iter()
                     .rev()
                     .find(|msg| msg.get("role").and_then(|r| r.as_str()) == Some("user"))
-                {
-                    let tool_results = last_user
-                        .get("content")
-                        .and_then(|c| c.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter(|b| {
-                                    b.get("type").and_then(|t| t.as_str()) == Some("tool_result")
-                                })
-                                .count()
-                        })
-                        .unwrap_or(0);
-                    ctx.tool_result_count = Some(tool_results);
+                    .and_then(|last_user| {
+                        last_user
+                            .get("content")
+                            .and_then(|c| c.as_array())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter(|b| {
+                                        b.get("type").and_then(|t| t.as_str())
+                                            == Some("tool_result")
+                                    })
+                                    .count()
+                            })
+                    })
+                    .unwrap_or(0);
+
+                ctx.tool_result_count = Some(tool_results);
+
+                // Session-level turn count (persists across compaction)
+                // - Fresh prompt (tool_results == 0): increment and use new count
+                // - Tool continuation (tool_results > 0): use existing count
+                if let Some(ref uid) = user_id {
+                    if let Ok(mut sessions) = state.sessions.lock() {
+                        let sid = sessions::UserId::new(uid);
+                        if tool_results == 0 {
+                            // Fresh user prompt - increment session turn count
+                            let turn = sessions.increment_turn_count(&sid);
+                            ctx.turn_number = Some(turn);
+                        } else {
+                            // Tool continuation - use existing count
+                            ctx.turn_number = Some(sessions.get_turn_count(&sid));
+                        }
+                    }
+                }
+
+                // Fallback: if no session available, count user messages in request
+                if ctx.turn_number.is_none() {
+                    let msg_turn = messages
+                        .iter()
+                        .filter(|msg| msg.get("role").and_then(|r| r.as_str()) == Some("user"))
+                        .count() as u64;
+                    ctx.turn_number = Some(msg_turn);
                 }
             }
 
@@ -925,10 +951,10 @@ async fn proxy_handler(
 
     // Decide: streaming (SSE) or buffered (JSON) response handling
     if sse::is_sse_response(&ctx.headers) && ctx.status.is_success() {
-        tracing::debug!("Handling SSE streaming response");
+        tracing::trace!("Handling SSE streaming response");
         handle_streaming_response(ctx).await
     } else {
-        tracing::debug!("Handling buffered (non-streaming) response");
+        tracing::trace!("Handling buffered (non-streaming) response");
         handle_buffered_response(ctx).await
     }
 }
@@ -1247,7 +1273,7 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
             }
         }
 
-        tracing::debug!(
+        tracing::trace!(
             "Streaming complete: {} bytes in {:.2}s",
             total_bytes,
             duration.as_secs_f64()

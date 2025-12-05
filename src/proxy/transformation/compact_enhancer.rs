@@ -116,38 +116,20 @@ impl CompactEnhancer {
 
     /// Build the context injection string
     ///
-    /// Generates markdown-formatted session context to append to compaction prompts
-    fn build_injection(&self, ctx: &TransformContext) -> String {
-        let mut sections = Vec::new();
+    /// Generates instructions for the compacting LLM to preserve continuity.
+    /// Focuses on capturing work tracks and mental flow, not stats that reset anyway.
+    fn build_injection(&self, _ctx: &TransformContext) -> String {
+        r#"
 
-        // Session state section
-        let mut state_items = Vec::new();
+## Aspy Continuity Enhancement
 
-        if let Some(turn) = ctx.turn_number {
-            state_items.push(format!("- Turn Number: {}", turn));
-        }
+**For the summary:** To help the continuing Claude maintain flow, please include:
+- **Active Work Tracks:** What features/bugs/tasks are in progress (with file paths if relevant)
+- **Key Decisions Made:** Important choices that shouldn't be revisited
+- **Current Mental Model:** The user's goals and approach being taken
 
-        if let (Some(tokens), Some(limit)) = (ctx.context_tokens, ctx.context_limit) {
-            let percent = if limit > 0 {
-                (tokens as f64 / limit as f64 * 100.0).round() as u64
-            } else {
-                0
-            };
-            state_items.push(format!(
-                "- Context Usage: {}/{} tokens ({}%)",
-                tokens, limit, percent
-            ));
-        }
-
-        if !state_items.is_empty() {
-            sections.push(format!("**Session State:**\n{}", state_items.join("\n")));
-        }
-
-        // Build final injection
-        format!(
-            "\n\n## Aspy Session Context\n\n{}\n\n**Note:** This context was injected by Aspy proxy to aid post-compaction continuity.",
-            sections.join("\n\n")
-        )
+**Post-compaction recovery:** The continuing Claude has `aspy_lifestats_context_hybrid` to search the full pre-compaction conversation. Include 3-5 searchable keywords (feature names, concepts, file paths) that would help locate detailed context."#
+            .to_string()
     }
 
     /// Extract text content from a user message (handles both string and array formats)
@@ -343,50 +325,53 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_injection_contains_session_context_header() {
+    fn test_injection_contains_continuity_header() {
         let enhancer = CompactEnhancer::new();
         let ctx = TransformContext::default();
 
         let injected = enhancer.build_injection(&ctx);
 
         assert!(
-            injected.contains("## Aspy Session Context"),
-            "Injection should contain Aspy Session Context header"
+            injected.contains("## Aspy Continuity Enhancement"),
+            "Injection should contain continuity header"
         );
     }
 
     #[test]
-    fn test_injection_contains_turn_number() {
+    fn test_injection_prompts_for_work_tracks() {
         let enhancer = CompactEnhancer::new();
-        let mut ctx = TransformContext::default();
-        ctx.turn_number = Some(42);
+        let ctx = TransformContext::default();
 
         let injected = enhancer.build_injection(&ctx);
 
         assert!(
-            injected.contains("Turn Number:") && injected.contains("42"),
-            "Injection should contain turn number from context"
+            injected.contains("Active Work Tracks"),
+            "Injection should prompt for active work tracks"
+        );
+        assert!(
+            injected.contains("Key Decisions Made"),
+            "Injection should prompt for key decisions"
+        );
+        assert!(
+            injected.contains("Current Mental Model"),
+            "Injection should prompt for mental model"
         );
     }
 
     #[test]
-    fn test_injection_contains_context_usage() {
+    fn test_injection_mentions_search_recovery() {
         let enhancer = CompactEnhancer::new();
-        let ctx = TransformContext {
-            context_tokens: Some(50000),
-            context_limit: Some(100000),
-            ..Default::default()
-        };
+        let ctx = TransformContext::default();
 
         let injected = enhancer.build_injection(&ctx);
 
         assert!(
-            injected.contains("Context Usage:"),
-            "Injection should contain context usage section"
+            injected.contains("aspy_lifestats_context_hybrid"),
+            "Injection should mention the hybrid search tool"
         );
         assert!(
-            injected.contains("50000") && injected.contains("100000"),
-            "Injection should contain actual token values"
+            injected.contains("searchable keywords"),
+            "Injection should request searchable keywords"
         );
     }
 
@@ -404,8 +389,8 @@ mod tests {
             TransformResult::Modified(new_body) => {
                 let content = extract_last_user_content(&new_body);
                 assert!(
-                    content.contains("## Aspy Session Context"),
-                    "Modified body should contain injected context"
+                    content.contains("## Aspy Continuity Enhancement"),
+                    "Modified body should contain injected continuity enhancement"
                 );
             }
             other => panic!("Expected Modified, got {:?}", other),
@@ -449,7 +434,7 @@ mod tests {
                 let last_block = content.last().unwrap();
                 let text = last_block["text"].as_str().unwrap();
                 assert!(
-                    text.contains("## Aspy Session Context"),
+                    text.contains("## Aspy Continuity Enhancement"),
                     "Should inject into last text block of array content"
                 );
             }

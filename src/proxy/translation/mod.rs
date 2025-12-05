@@ -412,7 +412,7 @@ impl TranslationPipeline {
         let detected = self.detect_format(path, headers, body);
 
         if detected == target {
-            tracing::debug!("Request already in {} format, passthrough", target);
+            tracing::trace!("Request already in {} format, passthrough", target);
             return Ok((
                 body.to_vec(),
                 TranslationContext::passthrough(),

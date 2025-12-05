@@ -1551,7 +1551,7 @@ impl Config {
             "translation",
             FeatureCategory::Pipeline,
             self.translation.enabled,
-            "API translation",
+            "API translation (experimental)",
         ));
 
         // Transformation: optional (request modification before forwarding)
@@ -1581,5 +1581,85 @@ impl Config {
         ));
 
         features
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify that serialized config can be parsed back.
+    /// This catches TOML syntax errors like using `[array.property]`
+    /// instead of dotted keys for array-of-tables elements.
+    #[test]
+    fn test_config_roundtrip_default() {
+        let config = Config::default();
+        let toml_str = config.to_toml();
+
+        // Should parse without error
+        let parsed: Result<FileConfig, _> = toml::from_str(&toml_str);
+        assert!(
+            parsed.is_ok(),
+            "Default config should round-trip.\nTOML:\n{}\nError: {:?}",
+            toml_str,
+            parsed.err()
+        );
+    }
+
+    /// Test round-trip with transformers containing rules and conditions.
+    /// This specifically tests the nested struct serialization that was buggy.
+    #[test]
+    fn test_config_roundtrip_with_transformers() {
+        use crate::proxy::transformation::{RuleConfig, TagEditorConfig, WhenCondition};
+
+        let mut config = Config::default();
+        config.transformers.enabled = true;
+        config.transformers.tag_editor = Some(TagEditorConfig {
+            enabled: true,
+            rules: vec![
+                RuleConfig::Remove {
+                    tag: "system-reminder".to_string(),
+                    pattern: "test-pattern".to_string(),
+                    when: Some(WhenCondition {
+                        turn_number: Some(">2".to_string()),
+                        has_tool_results: None,
+                        client_id: None,
+                    }),
+                },
+                RuleConfig::Inject {
+                    tag: "aspy-context".to_string(),
+                    content: "Injected content".to_string(),
+                    position: crate::proxy::transformation::PositionConfig::End,
+                    when: Some(WhenCondition {
+                        turn_number: Some("every:3".to_string()),
+                        has_tool_results: Some("=0".to_string()),
+                        client_id: Some("dev-1|foundry".to_string()),
+                    }),
+                },
+            ],
+        });
+
+        let toml_str = config.to_toml();
+
+        // Should parse without error
+        let parsed: Result<FileConfig, _> = toml::from_str(&toml_str);
+        assert!(
+            parsed.is_ok(),
+            "Config with transformers should round-trip.\nTOML:\n{}\nError: {:?}",
+            toml_str,
+            parsed.err()
+        );
+
+        // Verify the parsed config has the rules
+        let file_config = parsed.unwrap();
+        let tag_editor = file_config
+            .transformers
+            .and_then(|t| t.tag_editor)
+            .expect("tag_editor should be present");
+        assert_eq!(tag_editor.rules.len(), 2, "Should have 2 rules");
     }
 }

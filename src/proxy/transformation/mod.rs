@@ -30,7 +30,7 @@ mod system_reminder;
 pub use compact_enhancer::{CompactEnhancer, CompactEnhancerConfig};
 #[allow(unused_imports)]
 pub use system_reminder::{
-    InjectPosition, PositionConfig, RuleConfig, TagEditor, TagEditorConfig, TagRule,
+    InjectPosition, PositionConfig, RuleConfig, TagEditor, TagEditorConfig, TagRule, WhenCondition,
 };
 
 use axum::http::StatusCode;

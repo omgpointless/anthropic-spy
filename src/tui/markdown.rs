@@ -63,6 +63,9 @@ pub enum StyledSegment {
     TableRow(Vec<String>),
     /// Table end
     TableEnd,
+    /// XML/HTML-like tag: <tag>content</tag>
+    /// Rendered visually so user can see system-reminder, etc.
+    XmlTag { tag: String, content: String },
 }
 
 /// Parse markdown into styled segments
@@ -98,6 +101,11 @@ pub fn parse_markdown(markdown: &str) -> Vec<StyledSegment> {
     let mut in_table_head = false;
     let mut current_row: Vec<String> = Vec::new();
     let mut current_cell = String::new();
+
+    // XML tag state - for <system-reminder> and similar tags
+    let mut in_xml_tag: Option<String> = None;
+    let mut xml_tag_content = String::new();
+
     for event in Parser::new_ext(markdown, options) {
         match event {
             // Inline code: `filename.rs`
@@ -187,7 +195,12 @@ pub fn parse_markdown(markdown: &str) -> Vec<StyledSegment> {
 
             // Regular text
             Event::Text(text) => {
-                segments.push(StyledSegment::Text(text.to_string()));
+                // If we're inside an XML tag, accumulate the text as content
+                if in_xml_tag.is_some() {
+                    xml_tag_content.push_str(&text);
+                } else {
+                    segments.push(StyledSegment::Text(text.to_string()));
+                }
             }
 
             // Code block end - emit accumulated content
@@ -382,7 +395,55 @@ pub fn parse_markdown(markdown: &str) -> Vec<StyledSegment> {
                 current_cell.clear();
             }
 
-            _ => {}
+            // HTML/XML tag handling - for <system-reminder> and similar
+            Event::Html(html) | Event::InlineHtml(html) => {
+                let html_str = html.to_string();
+
+                // Check if this is an opening tag like <system-reminder>
+                if let Some(tag_name) = parse_opening_xml_tag(&html_str) {
+                    // Check if it's self-closing with content in same event
+                    if let Some((tag, content)) = parse_complete_xml_tag(&html_str) {
+                        segments.push(StyledSegment::XmlTag { tag, content });
+                    } else {
+                        // Start tracking this XML tag
+                        in_xml_tag = Some(tag_name);
+                        xml_tag_content.clear();
+                    }
+                } else if let Some(tag_name) = parse_closing_xml_tag(&html_str) {
+                    // Closing tag - emit segment if we were tracking this tag
+                    if let Some(ref open_tag) = in_xml_tag {
+                        if open_tag == &tag_name {
+                            segments.push(StyledSegment::XmlTag {
+                                tag: tag_name,
+                                content: xml_tag_content.trim().to_string(),
+                            });
+                            in_xml_tag = None;
+                            xml_tag_content.clear();
+                        }
+                    }
+                } else if in_xml_tag.is_some() {
+                    // Inside an XML tag, accumulate the raw HTML as content
+                    xml_tag_content.push_str(&html_str);
+                }
+            }
+
+            _ => {
+                // If we're inside an XML tag, try to capture any other events as content
+                if in_xml_tag.is_some() {
+                    // This handles text that appears between HTML events
+                    // (shouldn't normally happen, but be defensive)
+                }
+            }
+        }
+    }
+
+    // Handle unclosed XML tag at end of input
+    if let Some(tag) = in_xml_tag.take() {
+        if !xml_tag_content.is_empty() {
+            segments.push(StyledSegment::XmlTag {
+                tag,
+                content: xml_tag_content.trim().to_string(),
+            });
         }
     }
 
@@ -441,6 +502,49 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
     }
 
     result
+}
+
+/// Parse an opening XML tag like `<system-reminder>` and return the tag name
+fn parse_opening_xml_tag(s: &str) -> Option<String> {
+    let s = s.trim();
+    if s.starts_with('<') && !s.starts_with("</") && s.ends_with('>') {
+        // Extract tag name (handle attributes if present)
+        let inner = &s[1..s.len() - 1];
+        let tag_name = inner.split_whitespace().next()?;
+        // Don't match self-closing tags or HTML comments
+        if !tag_name.ends_with('/') && !tag_name.starts_with('!') {
+            return Some(tag_name.to_string());
+        }
+    }
+    None
+}
+
+/// Parse a closing XML tag like `</system-reminder>` and return the tag name
+fn parse_closing_xml_tag(s: &str) -> Option<String> {
+    let s = s.trim();
+    if s.starts_with("</") && s.ends_with('>') {
+        let tag_name = &s[2..s.len() - 1];
+        return Some(tag_name.trim().to_string());
+    }
+    None
+}
+
+/// Parse a complete XML tag like `<tag>content</tag>` in a single string
+fn parse_complete_xml_tag(s: &str) -> Option<(String, String)> {
+    let s = s.trim();
+
+    // Find opening tag
+    let open_end = s.find('>')?;
+    let open_tag = &s[1..open_end];
+    let tag_name = open_tag.split_whitespace().next()?;
+
+    // Find closing tag
+    let close_pattern = format!("</{}>", tag_name);
+    let close_start = s.rfind(&close_pattern)?;
+
+    // Extract content between tags
+    let content = &s[open_end + 1..close_start];
+    Some((tag_name.to_string(), content.trim().to_string()))
 }
 
 /// Convert parsed segments to ratatui Lines for rendering
@@ -694,6 +798,64 @@ pub fn segments_to_lines(
                 // Add spacing after table
                 lines.push(Line::from(""));
                 current_width = 0;
+            }
+
+            StyledSegment::XmlTag { tag, content } => {
+                // Render XML tags like <system-reminder> with visual distinction
+                // Flush current line first
+                flush_line(&mut lines, &mut current_spans);
+                current_width = 0;
+
+                // Use a distinct style: bordered box with tag name header
+                // Opening line with tag name
+                let header = format!("┌─ <{}> ", tag);
+                let header_pad = "─".repeat(width.saturating_sub(header.len() + 1).max(3));
+                lines.push(Line::from(vec![
+                    Span::styled(header, Style::default().fg(theme.rate_limit)),
+                    Span::styled(
+                        format!("{}┐", header_pad),
+                        Style::default()
+                            .fg(theme.border)
+                            .add_modifier(Modifier::DIM),
+                    ),
+                ]));
+
+                // Content lines with left border
+                for line in content.lines() {
+                    let wrapped = wrap_text(line, width.saturating_sub(4));
+                    for wrapped_line in wrapped {
+                        lines.push(Line::from(vec![
+                            Span::styled(
+                                "│ ".to_string(),
+                                Style::default()
+                                    .fg(theme.border)
+                                    .add_modifier(Modifier::DIM),
+                            ),
+                            Span::styled(
+                                wrapped_line,
+                                Style::default()
+                                    .fg(theme.foreground)
+                                    .add_modifier(Modifier::DIM),
+                            ),
+                        ]));
+                    }
+                }
+
+                // Closing line
+                let footer = format!("└─ </{}> ", tag);
+                let footer_pad = "─".repeat(width.saturating_sub(footer.len() + 1).max(3));
+                lines.push(Line::from(vec![
+                    Span::styled(footer, Style::default().fg(theme.rate_limit)),
+                    Span::styled(
+                        format!("{}┘", footer_pad),
+                        Style::default()
+                            .fg(theme.border)
+                            .add_modifier(Modifier::DIM),
+                    ),
+                ]));
+
+                // Add spacing after
+                lines.push(Line::from(""));
             }
         }
     }
@@ -1131,6 +1293,91 @@ mod tests {
             hard_break_count >= 5,
             "Expected at least 5 hard breaks, got {}",
             hard_break_count
+        );
+    }
+
+    #[test]
+    fn test_parse_xml_tag() {
+        // Test that XML-like tags are parsed and rendered
+        let md = "<system-reminder>\nThis is a reminder\n</system-reminder>";
+        let segments = parse_markdown(md);
+
+        println!("Segments for XML tag test:");
+        for (i, seg) in segments.iter().enumerate() {
+            println!("  {}: {:?}", i, seg);
+        }
+
+        // Should have at least one XmlTag segment
+        let xml_tag_count = segments
+            .iter()
+            .filter(|s| matches!(s, StyledSegment::XmlTag { .. }))
+            .count();
+        assert!(
+            xml_tag_count >= 1,
+            "Expected at least 1 XmlTag segment, got {}",
+            xml_tag_count
+        );
+
+        // Verify the tag content
+        if let Some(StyledSegment::XmlTag { tag, content }) = segments
+            .iter()
+            .find(|s| matches!(s, StyledSegment::XmlTag { .. }))
+        {
+            assert_eq!(tag, "system-reminder");
+            assert!(
+                content.contains("reminder"),
+                "Content should contain 'reminder': {}",
+                content
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_xml_tag_inline() {
+        // Test XML tag on single line
+        let md = "Before <tag>content</tag> after";
+        let segments = parse_markdown(md);
+
+        println!("Segments for inline XML tag test:");
+        for (i, seg) in segments.iter().enumerate() {
+            println!("  {}: {:?}", i, seg);
+        }
+
+        // Should have an XmlTag segment
+        let has_xml_tag = segments
+            .iter()
+            .any(|s| matches!(s, StyledSegment::XmlTag { tag, .. } if tag == "tag"));
+        assert!(has_xml_tag, "Expected XmlTag segment with tag='tag'");
+    }
+
+    #[test]
+    fn test_xml_tag_rendering() {
+        // Test that XML tags render to visible lines
+        let md = "<system-reminder>\nImportant info\n</system-reminder>";
+        let theme = Theme::default();
+        let lines = render_markdown(md, 80, &theme);
+
+        println!("Rendered lines for XML tag:");
+        for (i, line) in lines.iter().enumerate() {
+            let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            println!("  {}: {:?}", i, text);
+        }
+
+        // Should have multiple lines (header, content, footer)
+        assert!(
+            lines.len() >= 3,
+            "Expected at least 3 lines for XML tag box, got {}",
+            lines.len()
+        );
+
+        // Check that the tag name appears in the output
+        let all_text: String = lines
+            .iter()
+            .flat_map(|l| l.spans.iter().map(|s| s.content.as_ref()))
+            .collect();
+        assert!(
+            all_text.contains("system-reminder"),
+            "Output should contain tag name"
         );
     }
 }

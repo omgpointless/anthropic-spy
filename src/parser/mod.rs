@@ -118,10 +118,10 @@ impl Parser {
     /// This fixes a race condition where the streaming response task hadn't
     /// finished parsing before Claude Code sent the next request.
     pub async fn register_pending_tool(&self, id: String, name: String) {
-        tracing::debug!("REGISTERING pending tool: {} ({})", &id, &name);
+        tracing::trace!("REGISTERING pending tool: {} ({})", &id, &name);
         let mut pending = self.pending_calls.lock().await;
         pending.insert(id, (name, Utc::now()));
-        tracing::debug!("pending_calls now has {} entries", pending.len());
+        tracing::trace!("pending_calls now has {} entries", pending.len());
     }
 
     /// Parse an API request looking for tool results
@@ -133,7 +133,7 @@ impl Parser {
             Ok(req) => req,
             Err(e) => {
                 // Log the actual error for debugging
-                tracing::debug!("Serde error: {} at line {} col {}", e, e.line(), e.column());
+                tracing::error!("Serde error: {} at line {} col {}", e, e.line(), e.column());
                 return Err(anyhow::anyhow!("Failed to parse API request: {}", e));
             }
         };
@@ -143,14 +143,14 @@ impl Parser {
 
         let mut pending = self.pending_calls.lock().await;
 
-        tracing::debug!(
+        tracing::trace!(
             "parse_request: found {} tool_results, pending_calls has {} entries",
             tool_results.len(),
             pending.len()
         );
 
         for (tool_use_id, content, is_error) in tool_results {
-            tracing::debug!("Looking for tool_use_id {} in pending_calls", &tool_use_id);
+            tracing::trace!("Looking for tool_use_id {} in pending_calls", &tool_use_id);
             // Look up the original tool call to get its name and start time
             if let Some((tool_name, start_time)) = pending.remove(&tool_use_id) {
                 let duration = Utc::now()
@@ -158,7 +158,7 @@ impl Parser {
                     .to_std()
                     .unwrap_or_default();
 
-                tracing::debug!(
+                tracing::trace!(
                     "MATCH! Emitting ToolResult for {} ({})",
                     &tool_use_id,
                     &tool_name
@@ -173,7 +173,7 @@ impl Parser {
                     success: !is_error,
                 });
             } else {
-                tracing::debug!(
+                tracing::trace!(
                     "NO MATCH for tool_use_id {} - not in pending_calls",
                     &tool_use_id
                 );
@@ -195,7 +195,7 @@ impl Parser {
 
         if body_str.starts_with("event:") || body_str.contains("\nevent:") {
             // This is a streaming SSE response
-            tracing::debug!("Detected SSE streaming response");
+            tracing::trace!("Detected SSE streaming response");
             return self.parse_sse_response(body_str).await;
         }
 

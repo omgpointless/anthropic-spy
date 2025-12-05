@@ -64,9 +64,23 @@ impl SessionKey {
         Self::Explicit(session_id.into())
     }
 
-    /// Create implicit key from api_key_hash
+    /// Create implicit key for mid-restart sessions
+    ///
+    /// Generates a unique session ID like "foundry-a3f2" to distinguish
+    /// from explicit sessions and make it clear this is a recovery session.
     pub fn implicit(api_key_hash: impl Into<String>) -> Self {
-        Self::Implicit(api_key_hash.into())
+        let hash = api_key_hash.into();
+        let short_user = &hash[..8.min(hash.len())];
+
+        // Generate short random suffix for uniqueness
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u32)
+            .unwrap_or(0);
+        let suffix = format!("{:04x}", ts & 0xFFFF);
+
+        Self::Implicit(format!("{}-{}", short_user, suffix))
     }
 
     /// Get the underlying string value
@@ -85,8 +99,8 @@ impl SessionKey {
 impl std::fmt::Display for SessionKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Explicit(s) => write!(f, "session:{}", s),
-            Self::Implicit(s) => write!(f, "user:{}", s),
+            Self::Explicit(s) => write!(f, "{}", s),
+            Self::Implicit(s) => write!(f, "~{}", s), // ~ prefix indicates recovery session
         }
     }
 }
@@ -311,13 +325,36 @@ impl SessionManager {
     ) -> &Session {
         // Create session key
         let key = match session_id {
-            Some(ref id) => SessionKey::explicit(id),
-            None => SessionKey::implicit(&user_id.0),
+            Some(ref id) => {
+                tracing::debug!(
+                    session_id = %id,
+                    user = %user_id.short(),
+                    source = %source,
+                    "Creating explicit session (from hook)"
+                );
+                SessionKey::explicit(id)
+            }
+            None => {
+                let key = SessionKey::implicit(&user_id.0);
+                tracing::debug!(
+                    session_key = %key,
+                    user = %user_id.short(),
+                    source = %source,
+                    "Creating implicit session (mid-restart recovery)"
+                );
+                key
+            }
         };
 
         // Supersede existing session for this user
         if let Some(old_key) = self.active_by_user.remove(&user_id) {
             if let Some(mut old_session) = self.sessions.remove(&old_key) {
+                tracing::debug!(
+                    old_session = %old_key,
+                    new_session = %key,
+                    user = %user_id.short(),
+                    "Superseding existing session"
+                );
                 old_session.end(EndReason::Superseded);
                 self.archive_session(old_session);
             }
@@ -334,6 +371,12 @@ impl SessionManager {
     /// End a session explicitly (from hook)
     pub fn end_session(&mut self, key: &SessionKey, reason: EndReason) {
         if let Some(mut session) = self.sessions.remove(key) {
+            tracing::debug!(
+                session = %key,
+                user = %session.user_id.short(),
+                reason = %reason,
+                "Session ended"
+            );
             self.active_by_user.remove(&session.user_id);
             session.end(reason);
             self.archive_session(session);
@@ -344,6 +387,12 @@ impl SessionManager {
     pub fn end_session_by_user(&mut self, user_id: &UserId, reason: EndReason) {
         if let Some(key) = self.active_by_user.remove(user_id) {
             if let Some(mut session) = self.sessions.remove(&key) {
+                tracing::debug!(
+                    session = %key,
+                    user = %user_id.short(),
+                    reason = %reason,
+                    "Session ended by user"
+                );
                 session.end(reason);
                 self.archive_session(session);
             }
@@ -397,10 +446,10 @@ impl SessionManager {
     /// Get session ID for a user (for ProcessContext)
     ///
     /// Returns the session ID string if the user has an active session.
-    /// This is used to populate ProcessContext when sending events through the pipeline.
+    /// Uses Display format which includes `~` prefix for implicit (recovery) sessions.
     pub fn get_session_id(&self, user_id: &UserId) -> Option<String> {
         self.get_user_session(user_id)
-            .map(|session| session.key.as_str().to_string())
+            .map(|session| session.key.to_string()) // Use Display to include ~ prefix
     }
 
     /// List all active sessions
@@ -469,6 +518,27 @@ impl SessionManager {
         self.get_user_session(user_id).map(|s| s.stats.clone())
     }
 
+    /// Get current turn count for a user (without incrementing)
+    pub fn get_turn_count(&self, user_id: &UserId) -> u64 {
+        self.get_user_session(user_id)
+            .map(|s| s.stats.turn_count)
+            .unwrap_or(0)
+    }
+
+    /// Increment turn count for a user and return the new value
+    ///
+    /// Called when a fresh user prompt arrives (tool_result_count == 0).
+    /// Returns the new turn count, or 1 if no session exists yet.
+    pub fn increment_turn_count(&mut self, user_id: &UserId) -> u64 {
+        if let Some(session) = self.get_user_session_mut(user_id) {
+            session.stats.turn_count += 1;
+            session.stats.turn_count
+        } else {
+            // No session yet - will be 1 when session starts
+            1
+        }
+    }
+
     /// Backfill user_id for sessions with "unknown" user
     ///
     /// Called when we see a request with api_key_hash - updates any active
@@ -508,10 +578,18 @@ mod tests {
     #[test]
     fn test_session_key_display() {
         let explicit = SessionKey::explicit("abc123");
-        let implicit = SessionKey::implicit("a3f2c91b");
+        let implicit = SessionKey::implicit("a3f2c91b4e8d7f01");
 
-        assert_eq!(format!("{}", explicit), "session:abc123");
-        assert_eq!(format!("{}", implicit), "user:a3f2c91b");
+        // Explicit sessions display as-is
+        assert_eq!(format!("{}", explicit), "abc123");
+
+        // Implicit sessions have ~ prefix and generated suffix
+        let implicit_str = format!("{}", implicit);
+        assert!(
+            implicit_str.starts_with("~a3f2c91b-"),
+            "Implicit session should start with ~user_short-: {}",
+            implicit_str
+        );
     }
 
     #[test]

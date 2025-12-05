@@ -292,6 +292,13 @@ impl TagEditor {
                             InjectPosition::After(Regex::new(pattern)?)
                         }
                     };
+                    tracing::debug!(
+                        tag = %tag,
+                        content_preview = %content.chars().take(50).collect::<String>(),
+                        position = ?pos,
+                        has_when = when.is_some(),
+                        "Loaded Inject rule"
+                    );
                     TagRule::Inject {
                         tag: tag.clone(),
                         content: content.clone(),
@@ -299,11 +306,19 @@ impl TagEditor {
                         when: when.clone(),
                     }
                 }
-                RuleConfig::Remove { tag, pattern, when } => TagRule::Remove {
-                    tag: tag.clone(),
-                    pattern: Regex::new(pattern)?,
-                    when: when.clone(),
-                },
+                RuleConfig::Remove { tag, pattern, when } => {
+                    tracing::debug!(
+                        tag = %tag,
+                        pattern = %pattern,
+                        has_when = when.is_some(),
+                        "Loaded Remove rule"
+                    );
+                    TagRule::Remove {
+                        tag: tag.clone(),
+                        pattern: Regex::new(pattern)?,
+                        when: when.clone(),
+                    }
+                }
                 RuleConfig::Replace {
                     tag,
                     pattern,
@@ -467,7 +482,23 @@ impl TagEditor {
                     }
                 }
                 let before_len = blocks.len();
-                blocks.retain(|b| !(b.tag == *tag && pattern.is_match(&b.content)));
+                blocks.retain(|b| {
+                    let tag_matches = b.tag == *tag;
+                    let pattern_matches = pattern.is_match(&b.content);
+                    let should_remove = tag_matches && pattern_matches;
+                    if tag_matches {
+                        tracing::debug!(
+                            block_tag = %b.tag,
+                            rule_tag = %tag,
+                            content_preview = %b.content.chars().take(80).collect::<String>(),
+                            pattern = %pattern,
+                            pattern_matches = pattern_matches,
+                            should_remove = should_remove,
+                            "Remove rule: checking block"
+                        );
+                    }
+                    !should_remove
+                });
                 if blocks.len() != before_len {
                     tracing::debug!(
                         removed = before_len - blocks.len(),
@@ -802,12 +833,13 @@ impl RequestTransformer for TagEditor {
         }
 
         if !any_modified {
+            tracing::debug!("TagEditor: no modifications made, returning Unchanged");
             return TransformResult::Unchanged;
         }
 
-        tracing::debug!(
+        tracing::info!(
             rules = self.rules.len(),
-            "Applied system-reminder transformations"
+            "TagEditor: applied transformations successfully"
         );
 
         TransformResult::Modified(new_body)

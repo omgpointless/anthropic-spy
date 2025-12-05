@@ -54,6 +54,40 @@ Inspired by Linux's kernel/userland separation — adapted for our domain:
 | Stream modification (request)    | `proxy/transformation/[name].rs` + config   |
 | Feature-local helper             | `[feature]/helpers/[name].rs`               |
 
+## Adding a Configurable Feature (CHECKLIST)
+
+When adding a new feature with config, you **MUST** update all of these:
+
+| Step | File | What to add |
+|------|------|-------------|
+| 1 | `config.rs` | `XxxConfig` struct with fields and `Default` impl |
+| 2 | `config.rs` | `FileXxxConfig` struct (all fields `Option<T>`) for deserialize |
+| 3 | `config.rs` | Field in `FileConfig` struct |
+| 4 | `config.rs` | Field in `Config` struct |
+| 5 | `config.rs` | Merge logic in `Config::from_env()` |
+| 6 | `config.rs` | Serialization in `Config::to_toml()` |
+| 7 | `config.rs` | Entry in `Config::feature_definitions()` for StartupRegistry |
+
+### TOML Serialization Rules
+
+**CRITICAL**: When serializing config with array-of-tables (`[[...]]`), nested properties MUST use dotted keys:
+
+```toml
+# ✅ CORRECT - dotted keys within array element
+[[transformers.tag-editor.rules]]
+type = "remove"
+tag = "system-reminder"
+when.turn_number = ">2"              # Dotted key for nested struct
+
+# ❌ WRONG - table syntax doesn't work for array element properties
+[[transformers.tag-editor.rules]]
+type = "remove"
+[transformers.tag-editor.rules.when]  # INVALID: rules is an array!
+turn_number = ">2"
+```
+
+**Test round-trips**: After implementing serialization, verify `config → TOML → parse → config` produces equivalent results.
+
 ## Where Does State Live?
 
 | State type                             | Location                      |

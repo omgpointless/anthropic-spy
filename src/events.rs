@@ -232,6 +232,10 @@ pub struct Stats {
     pub thinking_blocks: usize,
     pub thinking_tokens: u64,
 
+    /// Session-level turn count (increments on fresh user prompts, persists across compaction)
+    /// A "fresh" turn = user prompt with no tool_result blocks (not a tool continuation)
+    pub turn_count: u64,
+
     // Current model being used (for cost calculation)
     pub current_model: Option<String>,
 
@@ -553,6 +557,7 @@ impl Stats {
         self.thinking_blocks += other.thinking_blocks;
         self.thinking_tokens += other.thinking_tokens;
         self.compact_count += other.compact_count;
+        self.turn_count += other.turn_count;
 
         // Merge per-model stats
         for (model, tokens) in &other.model_tokens {
@@ -596,6 +601,7 @@ impl Default for Stats {
             configured_context_limit: 0,
             thinking_blocks: 0,
             thinking_tokens: 0,
+            turn_count: 0,
             current_model: None,
             current_thinking: None,
             session_started: None,
