@@ -13,7 +13,7 @@ use clap::{Parser, Subcommand};
 use std::io::Write;
 use std::process::Command;
 
-/// Anthropic Spy - Observability proxy for Claude Code
+/// Aspy - Observability proxy for Claude Code
 #[derive(Parser)]
 #[command(name = "aspy")]
 #[command(version = VERSION)]

@@ -1,4 +1,4 @@
-// Anthropic Spy - Observability Proxy for Claude Code
+// Aspy - Observability Proxy for Claude Code
 //
 // This tool acts as an HTTP proxy between Claude Code and the Anthropic API,
 // logging all tool calls and responses for analysis and debugging.
@@ -32,7 +32,25 @@ use logging::{LogBuffer, TuiLogLayer};
 use std::sync::{Arc, Mutex};
 use storage::Storage;
 use tokio::sync::mpsc;
+use tracing_appender::rolling::{RollingFileAppender, Rotation};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
+/// Initialize tracing subscriber without file logging
+/// In TUI mode: capture logs to buffer (prevents garbling the display)
+/// In headless mode: output logs to stdout
+fn init_subscriber_without_file(filter: EnvFilter, enable_tui: bool, log_buffer: LogBuffer) {
+    if enable_tui {
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(TuiLogLayer::new(log_buffer))
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(tracing_subscriber::fmt::layer())
+            .init();
+    }
+}
 
 /// Shared buffer for streaming thinking content
 /// The proxy writes to this as thinking_delta events arrive,
@@ -182,36 +200,22 @@ async fn main() -> Result<()> {
                     config.logging.file_dir, e
                 );
                 // Fall back to non-file logging
-                if config.enable_tui {
-                    tracing_subscriber::registry()
-                        .with(filter)
-                        .with(TuiLogLayer::new(log_buffer.clone()))
-                        .init();
-                } else {
-                    tracing_subscriber::registry()
-                        .with(filter)
-                        .with(tracing_subscriber::fmt::layer())
-                        .init();
-                }
+                init_subscriber_without_file(filter, config.enable_tui, log_buffer.clone());
                 None
             } else {
-                // Create rolling file appender based on configured rotation
-                let file_appender = match config.logging.file_rotation {
-                    LogRotation::Hourly => tracing_appender::rolling::hourly(
-                        &config.logging.file_dir,
-                        &config.logging.file_prefix,
-                    ),
-                    LogRotation::Daily => tracing_appender::rolling::daily(
-                        &config.logging.file_dir,
-                        &config.logging.file_prefix,
-                    ),
-                    LogRotation::Never => tracing_appender::rolling::never(
-                        &config.logging.file_dir,
-                        &config.logging.file_prefix,
-                    ),
-                };
+                // Create a rolling file appender with builder based on configured rotation
+                let file_appender = RollingFileAppender::builder()
+                    .rotation(match config.logging.file_rotation {
+                        LogRotation::Hourly => Rotation::HOURLY,
+                        LogRotation::Daily => Rotation::DAILY,
+                        LogRotation::Never => Rotation::NEVER,
+                    })
+                    .filename_prefix(&config.logging.file_prefix)
+                    .filename_suffix("jsonl")
+                    .build(&config.logging.file_dir)
+                    .expect("Failed to create log appender");
 
-                // Wrap in non-blocking writer (writes happen in background thread)
+                // Wrap in a non-blocking writer (writes happen in background thread)
                 let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
                 // Initialize with file layer based on TUI mode
@@ -244,17 +248,7 @@ async fn main() -> Result<()> {
             }
         } else {
             // No file logging - initialize without file layer
-            if config.enable_tui {
-                tracing_subscriber::registry()
-                    .with(filter)
-                    .with(TuiLogLayer::new(log_buffer.clone()))
-                    .init();
-            } else {
-                tracing_subscriber::registry()
-                    .with(filter)
-                    .with(tracing_subscriber::fmt::layer())
-                    .init();
-            }
+            init_subscriber_without_file(filter, config.enable_tui, log_buffer.clone());
 
             None
         };

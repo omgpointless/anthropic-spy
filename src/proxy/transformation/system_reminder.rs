@@ -254,6 +254,28 @@ pub struct TagEditorConfig {
 // TagEditor
 // ============================================================================
 
+/// Result from applying rules to content
+#[derive(Debug, Default)]
+struct ApplyResult {
+    /// Modified content (None if unchanged)
+    content: Option<String>,
+    /// Descriptions of modifications made
+    modifications: Vec<String>,
+}
+
+impl ApplyResult {
+    fn unchanged() -> Self {
+        Self::default()
+    }
+
+    fn modified(content: String, modifications: Vec<String>) -> Self {
+        Self {
+            content: Some(content),
+            modifications,
+        }
+    }
+}
+
 /// Transformer that edits XML-style tags in user messages
 ///
 /// Each rule explicitly specifies which tag it targets (e.g., `<system-reminder>`,
@@ -394,8 +416,9 @@ impl TagEditor {
         &self,
         content: &str,
         ctx: &TransformContext,
-    ) -> Option<String> {
+    ) -> ApplyResult {
         let mut modified = false;
+        let mut modifications: Vec<String> = Vec::new();
         let mut result = content.to_string();
         let tags = self.collect_tags();
         let mut blocks = parse_tagged_blocks(&result, &tags);
@@ -425,8 +448,10 @@ impl TagEditor {
                 }
                 let before_len = blocks.len();
                 blocks.retain(|b| !(b.tag == *tag && pattern.is_match(&b.content)));
-                if blocks.len() != before_len {
-                    tracing::debug!(removed = before_len - blocks.len(), "Blocks removed");
+                let removed_count = before_len - blocks.len();
+                if removed_count > 0 {
+                    tracing::debug!(removed = removed_count, "Blocks removed");
+                    modifications.push(format!("Removed {} <{}> block(s)", removed_count, tag));
                     modified = true;
                 }
             }
@@ -447,20 +472,25 @@ impl TagEditor {
                         continue;
                     }
                 }
+                let mut replace_count = 0;
                 for block in &mut blocks {
                     if block.tag == *tag && pattern.is_match(&block.content) {
                         let new_content = pattern.replace_all(&block.content, replacement);
                         if new_content != block.content {
                             block.content = new_content.into_owned();
+                            replace_count += 1;
                             modified = true;
                         }
                     }
+                }
+                if replace_count > 0 {
+                    modifications.push(format!("Modified {} <{}> block(s)", replace_count, tag));
                 }
             }
         }
 
         if !modified {
-            return None;
+            return ApplyResult::unchanged();
         }
 
         // Reconstruct text, preserving original tag for each block
@@ -470,12 +500,13 @@ impl TagEditor {
             result.push_str(&block.content);
             result.push_str(&format!("\n</{}>", block.tag));
         }
-        Some(result)
+        ApplyResult::modified(result, modifications)
     }
 
     /// Apply all rules to the given text content
-    fn apply_rules(&self, content: &str, ctx: &TransformContext) -> Option<String> {
+    fn apply_rules(&self, content: &str, ctx: &TransformContext) -> ApplyResult {
         let mut modified = false;
+        let mut modifications: Vec<String> = Vec::new();
         let mut result = content.to_string();
         let tags = self.collect_tags();
 
@@ -534,15 +565,17 @@ impl TagEditor {
                     }
                     !should_remove
                 });
-                if blocks.len() != before_len {
+                let removed_count = before_len - blocks.len();
+                if removed_count > 0 {
                     tracing::debug!(
-                        removed = before_len - blocks.len(),
+                        removed = removed_count,
                         "Blocks removed by Remove rule: {} blocks removed for tag={:?} pattern={:?} when={:?}",
-                        before_len - blocks.len(),
+                        removed_count,
                         tag,
                         pattern,
                         when
                     );
+                    modifications.push(format!("Removed {} <{}> block(s)", removed_count, tag));
                     modified = true;
                 }
             }
@@ -568,14 +601,19 @@ impl TagEditor {
                         continue;
                     }
                 }
+                let mut replace_count = 0;
                 for block in &mut blocks {
                     if block.tag == *tag && pattern.is_match(&block.content) {
                         let new_content = pattern.replace_all(&block.content, replacement);
                         if new_content != block.content {
                             block.content = new_content.into_owned();
+                            replace_count += 1;
                             modified = true;
                         }
                     }
+                }
+                if replace_count > 0 {
+                    modifications.push(format!("Modified {} <{}> block(s)", replace_count, tag));
                 }
             }
         }
@@ -623,6 +661,7 @@ impl TagEditor {
                 };
 
                 blocks.insert(insert_idx, new_block);
+                modifications.push(format!("Injected <{}> block", tag));
                 modified = true;
             }
         }
@@ -642,9 +681,9 @@ impl TagEditor {
                 result = format!("{}\n{}", result.trim_end(), block_text);
             }
 
-            Some(result)
+            ApplyResult::modified(result, modifications)
         } else {
-            None
+            ApplyResult::unchanged()
         }
     }
 }
@@ -728,6 +767,7 @@ impl RequestTransformer for TagEditor {
             .unwrap();
 
         let mut any_modified = false;
+        let mut all_modifications: Vec<String> = Vec::new();
 
         match structure {
             ContentStructure::String => {
@@ -735,7 +775,8 @@ impl RequestTransformer for TagEditor {
                     .as_str()
                     .unwrap_or("")
                     .to_string();
-                if let Some(new_text) = self.apply_rules(&original, ctx) {
+                let result = self.apply_rules(&original, ctx);
+                if let Some(new_text) = result.content {
                     if new_text.trim().is_empty() {
                         // Empty string content: use minimal valid content
                         // (Can't delete the message, so use single space as fallback)
@@ -746,6 +787,7 @@ impl RequestTransformer for TagEditor {
                     } else {
                         messages_mut[last_user_idx]["content"] = Value::String(new_text);
                     }
+                    all_modifications.extend(result.modifications);
                     any_modified = true;
                 }
             }
@@ -776,18 +818,19 @@ impl RequestTransformer for TagEditor {
                     if let Some(block) = content_arr.get_mut(idx) {
                         if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
                             let is_last = Some(idx) == last_text_idx;
-                            let new_text = if is_last {
+                            let result = if is_last {
                                 self.apply_rules(text, ctx)
                             } else {
                                 self.apply_rules_remove_replace_only(text, ctx)
                             };
-                            if let Some(new_text) = new_text {
+                            if let Some(new_text) = result.content {
                                 // If text is empty after transformation, mark for deletion
                                 if new_text.trim().is_empty() {
                                     empty_block_indices.push(idx);
                                 } else {
                                     block["text"] = Value::String(new_text);
                                 }
+                                all_modifications.extend(result.modifications);
                                 any_modified = true;
                             }
                         }
@@ -820,9 +863,8 @@ impl RequestTransformer for TagEditor {
                         .and_then(|c| c.as_str())
                         .map(String::from)
                     {
-                        if let Some(new_content) =
-                            self.apply_rules_remove_replace_only(&content_str, ctx)
-                        {
+                        let result = self.apply_rules_remove_replace_only(&content_str, ctx);
+                        if let Some(new_content) = result.content {
                             // Don't remove tool_result even if content becomes empty
                             let final_content = if new_content.trim().is_empty() {
                                 " ".to_string() // Minimal valid content
@@ -830,6 +872,7 @@ impl RequestTransformer for TagEditor {
                                 new_content
                             };
                             block["content"] = Value::String(final_content);
+                            all_modifications.extend(result.modifications);
                             any_modified = true;
                             tracing::debug!(
                                 tool_result_idx = idx,
@@ -850,10 +893,10 @@ impl RequestTransformer for TagEditor {
                                 if let Some(text) =
                                     nested_block.get("text").and_then(|t| t.as_str())
                                 {
-                                    if let Some(new_text) =
-                                        self.apply_rules_remove_replace_only(text, ctx)
-                                    {
+                                    let result = self.apply_rules_remove_replace_only(text, ctx);
+                                    if let Some(new_text) = result.content {
                                         nested_modified = true;
+                                        all_modifications.extend(result.modifications);
                                         if !new_text.trim().is_empty() {
                                             let mut updated = nested_block.clone();
                                             updated["text"] = Value::String(new_text);
@@ -881,11 +924,13 @@ impl RequestTransformer for TagEditor {
 
                 // If no text blocks but we have Inject rules, append one
                 if text_block_indices.is_empty() && self.has_inject_rules() {
-                    if let Some(new_text) = self.apply_rules("", ctx) {
+                    let result = self.apply_rules("", ctx);
+                    if let Some(new_text) = result.content {
                         content_arr.push(serde_json::json!({
                             "type": "text",
                             "text": new_text
                         }));
+                        all_modifications.extend(result.modifications);
                         any_modified = true;
                     }
                 }
@@ -903,6 +948,7 @@ impl RequestTransformer for TagEditor {
             remove_rules = remove_count,
             replace_rules = replace_count,
             inject_rules = inject_count,
+            modifications = ?all_modifications,
             "TagEditor: applied transformations successfully with {} rules ({} Remove, {} Replace, {} Inject)",
             self.rules.len(),
             remove_count,
@@ -914,7 +960,20 @@ impl RequestTransformer for TagEditor {
         let tokens_before = crate::tokens::estimate_json_tokens(body);
         let tokens_after = crate::tokens::estimate_json_tokens(&new_body);
 
-        TransformResult::modified_with_tokens(new_body, tokens_before, tokens_after)
+        // Deduplicate modifications (same message may appear multiple times)
+        let mut unique_modifications: Vec<String> = Vec::new();
+        for m in all_modifications {
+            if !unique_modifications.contains(&m) {
+                unique_modifications.push(m);
+            }
+        }
+
+        TransformResult::modified_with_info(
+            new_body,
+            tokens_before,
+            tokens_after,
+            unique_modifications,
+        )
     }
 }
 
@@ -1082,10 +1141,12 @@ World"#;
         let editor = TagEditor::new(rules);
         let text = "Hello world";
         let ctx = test_ctx();
-        let result = editor.apply_rules(text, &ctx).unwrap();
+        let result = editor.apply_rules(text, &ctx);
+        let content = result.content.unwrap();
 
-        assert!(result.contains("Injected content"));
-        assert!(result.contains("<system-reminder>"));
+        assert!(content.contains("Injected content"));
+        assert!(content.contains("<system-reminder>"));
+        assert!(result.modifications.iter().any(|m| m.contains("Injected")));
     }
 
     #[test]
@@ -1106,9 +1167,11 @@ This should stay
 </system-reminder>"#;
 
         let ctx = test_ctx();
-        let result = editor.apply_rules(text, &ctx).unwrap();
-        assert!(!result.contains("noisy"));
-        assert!(result.contains("This should stay"));
+        let result = editor.apply_rules(text, &ctx);
+        let content = result.content.unwrap();
+        assert!(!content.contains("noisy"));
+        assert!(content.contains("This should stay"));
+        assert!(result.modifications.iter().any(|m| m.contains("Removed")));
     }
 
     #[test]
@@ -1126,9 +1189,11 @@ Visit old-url.com for docs
 </system-reminder>"#;
 
         let ctx = test_ctx();
-        let result = editor.apply_rules(text, &ctx).unwrap();
-        assert!(result.contains("new-url.com"));
-        assert!(!result.contains("old-url.com"));
+        let result = editor.apply_rules(text, &ctx);
+        let content = result.content.unwrap();
+        assert!(content.contains("new-url.com"));
+        assert!(!content.contains("old-url.com"));
+        assert!(result.modifications.iter().any(|m| m.contains("Modified")));
     }
 
     #[test]
@@ -1172,7 +1237,7 @@ Visit old-url.com for docs
         let text = "Just plain text without any matching content";
         let ctx = test_ctx();
 
-        assert!(editor.apply_rules(text, &ctx).is_none());
+        assert!(editor.apply_rules(text, &ctx).content.is_none());
     }
 
     // ============================================================================
@@ -1484,7 +1549,7 @@ Existing reminder
 </system-reminder>"#;
 
         let ctx = test_ctx();
-        let result = editor.apply_rules(text, &ctx).unwrap();
+        let result = editor.apply_rules(text, &ctx).content.unwrap();
 
         // Should have both reminders
         assert!(result.contains("Injected at start"));
@@ -1516,7 +1581,7 @@ This is existing content
 </system-reminder>"#;
 
         let ctx = test_ctx();
-        let result = editor.apply_rules(text, &ctx).unwrap();
+        let result = editor.apply_rules(text, &ctx).content.unwrap();
 
         // Should have both reminders
         assert!(result.contains("Injected before"));
@@ -1548,7 +1613,7 @@ This is existing content
 </system-reminder>"#;
 
         let ctx = test_ctx();
-        let result = editor.apply_rules(text, &ctx).unwrap();
+        let result = editor.apply_rules(text, &ctx).content.unwrap();
 
         // Should have both reminders
         assert!(result.contains("Injected after"));
@@ -1586,7 +1651,7 @@ Should stay
 </aspy-context>"#;
 
         let ctx = test_ctx();
-        let result = editor.apply_rules(text, &ctx).unwrap();
+        let result = editor.apply_rules(text, &ctx).content.unwrap();
 
         // system-reminder content should be gone
         assert!(
@@ -1618,7 +1683,7 @@ Contains old value - should become new
 </aspy-context>"#;
 
         let ctx = test_ctx();
-        let result = editor.apply_rules(text, &ctx).unwrap();
+        let result = editor.apply_rules(text, &ctx).content.unwrap();
 
         // system-reminder should still have "old"
         assert!(
@@ -1645,7 +1710,7 @@ Contains old value - should become new
         let editor = TagEditor::new(rules);
         let text = "Hello world";
         let ctx = test_ctx();
-        let result = editor.apply_rules(text, &ctx).unwrap();
+        let result = editor.apply_rules(text, &ctx).content.unwrap();
 
         assert!(result.contains("<custom-tag>"), "Should create opening tag");
         assert!(
@@ -1695,7 +1760,7 @@ Version: v1
 </config-tag>"#;
 
         let ctx = test_ctx();
-        let result = editor.apply_rules(text, &ctx).unwrap();
+        let result = editor.apply_rules(text, &ctx).content.unwrap();
 
         // noisy-tag content removed
         assert!(
@@ -1750,7 +1815,7 @@ Content with keep-me gets removed
 </tag-b>"#;
 
         let ctx = test_ctx();
-        let result = editor.apply_rules(text, &ctx).unwrap();
+        let result = editor.apply_rules(text, &ctx).content.unwrap();
 
         // tag-a with "remove-me" should be gone
         assert!(

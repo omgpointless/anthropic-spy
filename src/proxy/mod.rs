@@ -570,128 +570,137 @@ async fn proxy_handler(
     // ─────────────────────────────────────────────────────────────────────────
     // SystemReminderEditor and future transformers expect Anthropic message format.
     // We transform first, then translate to target format if needed.
-    let (body_bytes, body_was_transformed, transform_tokens) = if is_likely_messages
-        && method == "POST"
-        && state.transformers_config.enabled
-        && !state.transformation.is_empty()
-    {
-        if let Ok(body_json) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
-            let model = body_json.get("model").and_then(|m| m.as_str());
-            let mut ctx =
-                transformation::TransformContext::new(user_id.as_deref(), &routing.api_path, model);
+    let (body_bytes, body_was_transformed, transform_tokens, transform_modifications) =
+        if is_likely_messages
+            && method == "POST"
+            && state.transformers_config.enabled
+            && !state.transformation.is_empty()
+        {
+            if let Ok(body_json) = serde_json::from_slice::<serde_json::Value>(&body_bytes) {
+                let model = body_json.get("model").and_then(|m| m.as_str());
+                let mut ctx = transformation::TransformContext::new(
+                    user_id.as_deref(),
+                    &routing.api_path,
+                    model,
+                );
 
-            // Extract tool_result_count and compute session turn_number
-            if let Some(messages) = body_json.get("messages").and_then(|m| m.as_array()) {
-                // Tool result count = count in last user message
-                let tool_results = messages
-                    .iter()
-                    .rev()
-                    .find(|msg| msg.get("role").and_then(|r| r.as_str()) == Some("user"))
-                    .and_then(|last_user| {
-                        last_user
-                            .get("content")
-                            .and_then(|c| c.as_array())
-                            .map(|arr| {
-                                arr.iter()
-                                    .filter(|b| {
-                                        b.get("type").and_then(|t| t.as_str())
-                                            == Some("tool_result")
-                                    })
-                                    .count()
-                            })
-                    })
-                    .unwrap_or(0);
+                // Extract tool_result_count and compute session turn_number
+                if let Some(messages) = body_json.get("messages").and_then(|m| m.as_array()) {
+                    // Tool result count = count in last user message
+                    let tool_results = messages
+                        .iter()
+                        .rev()
+                        .find(|msg| msg.get("role").and_then(|r| r.as_str()) == Some("user"))
+                        .and_then(|last_user| {
+                            last_user
+                                .get("content")
+                                .and_then(|c| c.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter(|b| {
+                                            b.get("type").and_then(|t| t.as_str())
+                                                == Some("tool_result")
+                                        })
+                                        .count()
+                                })
+                        })
+                        .unwrap_or(0);
 
-                ctx.tool_result_count = Some(tool_results);
+                    ctx.tool_result_count = Some(tool_results);
 
-                // Session-level turn count (persists across compaction)
-                // - Fresh prompt (tool_results == 0): increment and use new count
-                // - Tool continuation (tool_results > 0): use existing count
-                if let Some(ref uid) = user_id {
-                    if let Ok(mut sessions) = state.sessions.lock() {
-                        let sid = sessions::UserId::new(uid);
-                        if tool_results == 0 {
-                            // Fresh user prompt - increment session turn count
-                            let turn = sessions.increment_turn_count(&sid);
-                            ctx.turn_number = Some(turn);
-                        } else {
-                            // Tool continuation - use existing count
-                            ctx.turn_number = Some(sessions.get_turn_count(&sid));
+                    // Session-level turn count (persists across compaction)
+                    // - Fresh prompt (tool_results == 0): increment and use new count
+                    // - Tool continuation (tool_results > 0): use existing count
+                    if let Some(ref uid) = user_id {
+                        if let Ok(mut sessions) = state.sessions.lock() {
+                            let sid = sessions::UserId::new(uid);
+                            if tool_results == 0 {
+                                // Fresh user prompt - increment session turn count
+                                let turn = sessions.increment_turn_count(&sid);
+                                ctx.turn_number = Some(turn);
+                            } else {
+                                // Tool continuation - use existing count
+                                ctx.turn_number = Some(sessions.get_turn_count(&sid));
+                            }
                         }
                     }
-                }
 
-                // Fallback: if no session available, count user messages in request
-                if ctx.turn_number.is_none() {
-                    let msg_turn = messages
-                        .iter()
-                        .filter(|msg| msg.get("role").and_then(|r| r.as_str()) == Some("user"))
-                        .count() as u64;
-                    ctx.turn_number = Some(msg_turn);
-                }
-            }
-
-            tracing::debug!(
-                turn = ctx.turn_number,
-                tool_results = ctx.tool_result_count,
-                client = ctx.client_id,
-                "Transformer context: turn={} tool_results={} client={}",
-                ctx.turn_number.unwrap_or(0),
-                ctx.tool_result_count.unwrap_or(0),
-                ctx.client_id.unwrap_or("unknown")
-            );
-
-            tracing::debug!(
-                transformers = ?state.transformation.transformer_names(),
-                "Running transformation pipeline on request"
-            );
-            match state.transformation.transform(&body_json, &ctx) {
-                transformation::TransformResult::Modified {
-                    body: new_body,
-                    tokens,
-                } => {
-                    if let Some(t) = tokens {
-                        tracing::info!(
-                            tokens_before = t.before,
-                            tokens_after = t.after,
-                            delta = t.delta(),
-                            "✓ Request transformed: {} tokens → {} tokens (Δ{})",
-                            t.before,
-                            t.after,
-                            t.delta()
-                        );
-                    } else {
-                        tracing::info!("✓ Request transformed (no token tracking)");
+                    // Fallback: if no session available, count user messages in request
+                    if ctx.turn_number.is_none() {
+                        let msg_turn = messages
+                            .iter()
+                            .filter(|msg| msg.get("role").and_then(|r| r.as_str()) == Some("user"))
+                            .count() as u64;
+                        ctx.turn_number = Some(msg_turn);
                     }
-                    (
-                        serde_json::to_vec(&new_body).unwrap_or_else(|_| body_bytes.to_vec()),
-                        true,
+                }
+
+                tracing::debug!(
+                    turn = ctx.turn_number,
+                    tool_results = ctx.tool_result_count,
+                    client = ctx.client_id,
+                    "Transformer context: turn={} tool_results={} client={}",
+                    ctx.turn_number.unwrap_or(0),
+                    ctx.tool_result_count.unwrap_or(0),
+                    ctx.client_id.unwrap_or("unknown")
+                );
+
+                tracing::debug!(
+                    transformers = ?state.transformation.transformer_names(),
+                    "Running transformation pipeline on request"
+                );
+                match state.transformation.transform(&body_json, &ctx) {
+                    transformation::TransformResult::Modified {
+                        body: new_body,
                         tokens,
-                    )
+                        modifications,
+                    } => {
+                        if let Some(t) = &tokens {
+                            tracing::info!(
+                                tokens_before = t.before,
+                                tokens_after = t.after,
+                                delta = t.delta(),
+                                modifications = ?modifications,
+                                "✓ Request transformed: {} tokens → {} tokens (Δ{})",
+                                t.before,
+                                t.after,
+                                t.delta()
+                            );
+                        } else {
+                            tracing::info!(modifications = ?modifications, "✓ Request transformed (no token tracking)");
+                        }
+                        (
+                            serde_json::to_vec(&new_body).unwrap_or_else(|_| body_bytes.to_vec()),
+                            true,
+                            tokens,
+                            modifications,
+                        )
+                    }
+                    transformation::TransformResult::Block { reason, status } => {
+                        tracing::info!(
+                            "Request blocked by transformation pipeline: {} (status {})",
+                            reason,
+                            status
+                        );
+                        return Err(ProxyError::BodyRead(format!(
+                            "Request blocked: {} (status {})",
+                            reason, status
+                        )));
+                    }
+                    transformation::TransformResult::Error(e) => {
+                        tracing::warn!("Transformation error (continuing with original): {}", e);
+                        (body_bytes.to_vec(), false, None, Vec::new())
+                    }
+                    transformation::TransformResult::Unchanged => {
+                        (body_bytes.to_vec(), false, None, Vec::new())
+                    }
                 }
-                transformation::TransformResult::Block { reason, status } => {
-                    tracing::info!(
-                        "Request blocked by transformation pipeline: {} (status {})",
-                        reason,
-                        status
-                    );
-                    return Err(ProxyError::BodyRead(format!(
-                        "Request blocked: {} (status {})",
-                        reason, status
-                    )));
-                }
-                transformation::TransformResult::Error(e) => {
-                    tracing::warn!("Transformation error (continuing with original): {}", e);
-                    (body_bytes.to_vec(), false, None)
-                }
-                transformation::TransformResult::Unchanged => (body_bytes.to_vec(), false, None),
+            } else {
+                (body_bytes.to_vec(), false, None, Vec::new())
             }
         } else {
-            (body_bytes.to_vec(), false, None)
-        }
-    } else {
-        (body_bytes.to_vec(), false, None)
-    };
+            (body_bytes.to_vec(), false, None, Vec::new())
+        };
 
     // Determine target API format based on provider config
     // If provider expects OpenAI format, translate Anthropic → OpenAI
@@ -785,6 +794,7 @@ async fn proxy_handler(
                     transformer: "transformation-pipeline".to_string(),
                     tokens_before: tokens.before,
                     tokens_after: tokens.after,
+                    modifications: transform_modifications,
                 },
                 user_id.as_deref(),
             )

@@ -368,16 +368,23 @@ pub(crate) fn format_event_line(tracked: &TrackedEvent) -> String {
             transformer,
             tokens_before,
             tokens_after,
+            modifications,
         } => {
             let delta = *tokens_after as i64 - *tokens_before as i64;
             let sign = if delta >= 0 { "+" } else { "" };
+            let mods_preview = if modifications.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", modifications.join(", "))
+            };
             format!(
-                "[{}] {}⚙️ Transform [{}]: {}{}",
+                "[{}] {}⚙️ Transform [{}]: {}{}{}",
                 timestamp.format("%H:%M:%S"),
                 user_prefix,
                 transformer,
                 sign,
-                delta
+                delta,
+                mods_preview
             )
         }
         ProxyEvent::ResponseAugmented {
@@ -758,12 +765,23 @@ pub(crate) fn format_event_detail(tracked: &TrackedEvent) -> RenderableContent {
             transformer,
             tokens_before,
             tokens_after,
+            modifications,
         } => {
             let delta = *tokens_after as i64 - *tokens_before as i64;
             let (sign, delta_style) = if delta >= 0 {
                 ("+", "added")
             } else {
                 ("", "removed")
+            };
+            let modifications_section = if modifications.is_empty() {
+                String::new()
+            } else {
+                let mods_list = modifications
+                    .iter()
+                    .map(|m| format!("- {}", m))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                format!("\n\n### Modifications\n\n{}", mods_list)
             };
             RenderableContent::Markdown(format!(
                 "{}## ⚙️ Request Transformed\n\n\
@@ -773,7 +791,7 @@ pub(crate) fn format_event_detail(tracked: &TrackedEvent) -> RenderableContent {
                 ### Token Delta\n\n\
                 **Before:** ~{} tokens  \n\
                 **After:** ~{} tokens  \n\
-                **Change:** {}{} tokens {}\n\n\
+                **Change:** {}{} tokens {}{}\n\n\
                 *Aspy modified this request before sending to API.*",
                 tracking_header,
                 timestamp.to_rfc3339(),
@@ -782,7 +800,8 @@ pub(crate) fn format_event_detail(tracked: &TrackedEvent) -> RenderableContent {
                 tokens_after,
                 sign,
                 delta,
-                delta_style
+                delta_style,
+                modifications_section
             ))
         }
         ProxyEvent::ResponseAugmented {

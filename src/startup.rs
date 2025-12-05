@@ -233,7 +233,7 @@ pub fn print_startup_with_registry(config: &Config, registry: &StartupRegistry) 
 
     // Banner
     println!();
-    println!("  {BOLD}{CYAN}Anthropic Spy{RESET} {DIM}v{VERSION}{RESET}");
+    println!("  {BOLD}{CYAN}Aspy{RESET} {DIM}v{VERSION}{RESET}");
     println!("  {DIM}Observability proxy for Claude Code{RESET}");
     println!();
 
@@ -329,7 +329,7 @@ fn print_feature_status(feature: &FeatureDefinition) {
 pub fn log_startup_with_registry(config: &Config, registry: &StartupRegistry) {
     // ASCII art header
     tracing::info!("═══════════════════════════════════");
-    tracing::info!("  🕵️  ANTHROPIC SPY v{}", VERSION);
+    tracing::info!("  🕵️  ASPY v{}", VERSION);
     tracing::info!("═══════════════════════════════════");
 
     // Module loading by category

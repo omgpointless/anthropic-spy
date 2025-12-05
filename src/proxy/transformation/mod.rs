@@ -75,6 +75,8 @@ pub enum TransformResult {
         body: Value,
         /// Token counts before/after (for stats tracking)
         tokens: Option<TransformTokens>,
+        /// Human-readable descriptions of what was modified
+        modifications: Vec<String>,
     },
 
     /// Block request entirely (e.g., content policy violation)
@@ -100,8 +102,14 @@ pub enum TransformResult {
 
 impl TransformResult {
     /// Helper to create a Modified result without token tracking
+    /// Future: Used by simpler transformers that don't need modification descriptions
+    #[allow(dead_code)]
     pub fn modified(body: Value) -> Self {
-        Self::Modified { body, tokens: None }
+        Self::Modified {
+            body,
+            tokens: None,
+            modifications: Vec::new(),
+        }
     }
 
     /// Helper to create a Modified result with token tracking
@@ -109,6 +117,21 @@ impl TransformResult {
         Self::Modified {
             body,
             tokens: Some(TransformTokens::new(before, after)),
+            modifications: Vec::new(),
+        }
+    }
+
+    /// Helper to create a Modified result with modifications list
+    pub fn modified_with_info(
+        body: Value,
+        before: u32,
+        after: u32,
+        modifications: Vec<String>,
+    ) -> Self {
+        Self::Modified {
+            body,
+            tokens: Some(TransformTokens::new(before, after)),
+            modifications,
         }
     }
 }
@@ -303,7 +326,7 @@ impl TransformationPipeline {
     /// `TransformResult::Block { ... }` if any transformer blocked the request.
     ///
     /// Uses `Cow` internally to avoid cloning when all transformers pass through.
-    /// Accumulates token deltas from all transformers that report them.
+    /// Accumulates token deltas and modification descriptions from all transformers.
     pub fn transform<'a>(&self, body: &'a Value, ctx: &TransformContext) -> TransformResult {
         if self.transformers.is_empty() {
             return TransformResult::Unchanged;
@@ -315,6 +338,8 @@ impl TransformationPipeline {
         let mut total_tokens_before: u32 = 0;
         let mut total_tokens_after: u32 = 0;
         let mut any_tokens_tracked = false;
+        // Accumulate modification descriptions
+        let mut all_modifications: Vec<String> = Vec::new();
 
         for transformer in &self.transformers {
             // Fast-path: skip if transformer doesn't apply
@@ -334,13 +359,18 @@ impl TransformationPipeline {
                     );
                     // No change, keep current (borrowed or owned)
                 }
-                TransformResult::Modified { body, tokens } => {
+                TransformResult::Modified {
+                    body,
+                    tokens,
+                    modifications,
+                } => {
                     if let Some(t) = tokens {
                         tracing::info!(
                             transformer = transformer.name(),
                             tokens_before = t.before,
                             tokens_after = t.after,
                             delta = t.delta(),
+                            modifications = ?modifications,
                             "Transformer modified request: {} tokens → {} tokens (Δ{})",
                             t.before,
                             t.after,
@@ -352,9 +382,12 @@ impl TransformationPipeline {
                     } else {
                         tracing::info!(
                             transformer = transformer.name(),
+                            modifications = ?modifications,
                             "Transformer modified request (no token tracking)"
                         );
                     }
+                    // Accumulate modifications from this transformer
+                    all_modifications.extend(modifications);
                     current = Cow::Owned(body);
                 }
                 TransformResult::Block { reason, status } => {
@@ -389,13 +422,18 @@ impl TransformationPipeline {
             Cow::Borrowed(_) => TransformResult::Unchanged,
             Cow::Owned(modified) => {
                 if any_tokens_tracked {
-                    TransformResult::modified_with_tokens(
+                    TransformResult::modified_with_info(
                         modified,
                         total_tokens_before,
                         total_tokens_after,
+                        all_modifications,
                     )
                 } else {
-                    TransformResult::modified(modified)
+                    TransformResult::Modified {
+                        body: modified,
+                        tokens: None,
+                        modifications: all_modifications,
+                    }
                 }
             }
         }

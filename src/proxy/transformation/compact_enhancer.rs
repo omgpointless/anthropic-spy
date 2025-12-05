@@ -395,6 +395,7 @@ mod tests {
             TransformResult::Modified {
                 body: new_body,
                 tokens,
+                ..
             } => {
                 let content = extract_last_user_content(&new_body);
                 assert!(

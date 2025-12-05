@@ -14,7 +14,7 @@ use ratatui::{
 /// Render the title bar at the top of the screen
 ///
 /// Shows:
-/// - App name ("Anthropic Spy")
+/// - App name ("Aspy")
 /// - Streaming indicator (spinner + state) when active
 /// - Conversation topic (extracted from Haiku summarization)
 /// - Zoom indicator (right side, hidden on small screens)
@@ -33,11 +33,11 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         Some(topic) => {
             let indicator = if app.topic.is_new_topic { "●" } else { "◦" };
             format!(
-                " 🔍 Anthropic Spy{} ──── {} {}",
+                " 🐍 Aspy{} ──── {} {}",
                 streaming_indicator, indicator, topic
             )
         }
-        None => format!(" 🔍 Anthropic Spy{}", streaming_indicator),
+        None => format!(" 🐍 Aspy{}", streaming_indicator),
     };
 
     // Build right-side indicator (zoom or help hint)

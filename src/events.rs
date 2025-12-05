@@ -131,6 +131,8 @@ pub enum ProxyEvent {
         tokens_before: u32,
         /// Tokens after transformation
         tokens_after: u32,
+        /// Human-readable descriptions of modifications made
+        modifications: Vec<String>,
     },
 
     /// Response was augmented (tokens injected)

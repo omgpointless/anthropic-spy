@@ -17,7 +17,6 @@ pub(crate) use events::{format_event_detail, format_event_line};
 
 use super::app::{App, View};
 use super::preset::Panel;
-use super::scroll::FocusablePanel;
 use crate::tui::components;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
@@ -37,6 +36,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let shell = &app.preset.shell;
 
     // Collect constraints: headers + content + footers
+    // When zoomed, skip Logs and ContextBar to maximize content area
     let mut constraints: Vec<Constraint> = Vec::new();
     let mut panel_map: Vec<Option<Panel>> = Vec::new();
 
@@ -50,8 +50,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     constraints.push(Constraint::Min(10));
     panel_map.push(None); // None = content slot
 
-    // Add footer slots
+    // Add footer slots (skip Logs/ContextBar when zoomed)
     for slot in &shell.footer {
+        // When zoomed, only include Status bar in footer
+        if app.zoomed && matches!(slot.panel, Panel::Logs | Panel::ContextBar) {
+            continue;
+        }
         constraints.push(slot.size.to_constraint());
         panel_map.push(Some(slot.panel));
     }
@@ -66,12 +70,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     for (i, panel) in panel_map.iter().enumerate() {
         match panel {
             Some(Panel::Title) => components::render_title(f, chunks[i], app),
-            Some(Panel::Logs) => {
-                // Skip logs in shell when zoomed on logs (it's rendered in content area)
-                if !(app.zoomed && app.focused == FocusablePanel::Logs) {
-                    components::render_logs_panel(f, chunks[i], app);
-                }
-            }
+            Some(Panel::Logs) => components::render_logs_panel(f, chunks[i], app),
             Some(Panel::ContextBar) => components::render_context_bar(f, chunks[i], app),
             Some(Panel::Status) => components::render_status(f, chunks[i], app),
             None => content_area = Some(chunks[i]), // Content slot
