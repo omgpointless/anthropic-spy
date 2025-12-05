@@ -309,6 +309,59 @@ content = "You are connected to the development environment."
 when = { client_id = "dev-1|dev-2" }  # Pipe = OR
 ```
 
+## Compact Enhancer
+
+Detects Anthropic's compaction prompts and enhances them with continuity guidance. When Claude Code's context window fills up, Anthropic sends a special prompt asking Claude to summarize the conversation. This transformer appends instructions to improve what gets preserved.
+
+### How It Works
+
+1. **Detection** - Multi-signal detection identifies compaction requests:
+   - Primary signal: "summary of the conversation" phrase (required)
+   - Structural markers: Section headers like "Primary Request", "Pending Tasks" (2+ required)
+
+2. **Injection** - Appends continuity guidance to the compaction prompt:
+   - Prompts for active work tracks, key decisions, current mental model
+   - Suggests searchable keywords for post-compaction recovery
+   - Mentions `aspy_lifestats_context_hybrid` for context lookup
+
+### Configuration
+
+```toml
+[transformers]
+enabled = true
+
+[transformers.compact-enhancer]
+enabled = true
+```
+
+### What Gets Injected
+
+When a compaction request is detected, this text is appended:
+
+```markdown
+## Aspy Continuity Enhancement
+
+**For the summary:** To help the continuing Claude maintain flow, please include:
+- **Active Work Tracks:** What features/bugs/tasks are in progress (with file paths if relevant)
+- **Key Decisions Made:** Important choices that shouldn't be revisited
+- **Current Mental Model:** The user's goals and approach being taken
+
+**Post-compaction recovery:** The continuing Claude has `aspy_lifestats_context_hybrid` to search
+the full pre-compaction conversation. Include 3-5 searchable keywords (feature names, concepts,
+file paths) that would help locate detailed context.
+```
+
+### Why This Matters
+
+Without guidance, compaction summaries often lose:
+- File paths and specific locations
+- The "why" behind decisions
+- Current work direction and momentum
+
+The CompactEnhancer nudges the summarizing Claude to preserve what the continuing Claude actually needs.
+
+---
+
 ## Future Transformers
 
 Planned additions:

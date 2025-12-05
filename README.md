@@ -95,6 +95,8 @@ Generates mock events to showcase the interface.
 | [Multi-Client Routing](docs/sessions.md) | Track multiple Claude instances |
 | [REST API](docs/api-reference.md) | Programmatic endpoints |
 | [Semantic Search](docs/semantic-search-guide.md) | Configure embeddings for hybrid search |
+| [Request Transformers](docs/transformers.md) | Edit XML tags, inject context conditionally |
+| [API Translation](docs/api-translation-guide.md) | Use Claude Code with any OpenAI-compatible backend |
 | [Architecture](docs/architecture.md) | For contributors |
 
 ## Package Managers

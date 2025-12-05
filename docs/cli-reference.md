@@ -111,6 +111,40 @@ Prints the config file path:
 /home/user/.config/aspy/config.toml
 ```
 
+## Embeddings Commands
+
+Manage the semantic search embedding system:
+
+```bash
+# Check indexer status (works with or without proxy running)
+aspy embeddings --status
+
+# Force reindex all content (clears existing embeddings)
+aspy embeddings --reindex
+```
+
+### Status Output
+
+**Offline mode** (proxy not running):
+```
+Embeddings Status (Offline)
+  Provider:   remote
+  Model:      text-embedding-3-small
+  Dimensions: 1536
+  Total:      0/530 (0.0%)
+```
+
+**Live mode** (proxy running):
+```
+Embeddings Status (Live)
+  Indexer:    RUNNING
+  Provider:   remote
+  Model:      text-embedding-3-small
+  Progress:   127/530 (23.9%)
+```
+
+See [Semantic Search Guide](semantic-search-guide.md) for full configuration.
+
 ## Configuration File Format
 
 Location: `~/.config/aspy/config.toml`
@@ -222,6 +256,22 @@ All features are enabled by default (opt-out pattern):
 | Option | Default | Description |
 |--------|---------|-------------|
 | `logging.level` | `"info"` | Log level: trace, debug, info, warn, error |
+| `logging.file_enabled` | `false` | Enable file logging (in addition to TUI) |
+| `logging.file_dir` | `"./logs"` | Directory for log files |
+| `logging.file_rotation` | `"daily"` | Rotation: `hourly`, `daily`, `never` |
+| `logging.file_prefix` | `"aspy"` | Log file name prefix |
+
+**File logging example:**
+```toml
+[logging]
+level = "debug"
+file_enabled = true
+file_dir = "~/.local/share/aspy/logs"
+file_rotation = "daily"
+file_prefix = "aspy"
+```
+
+Creates files like `aspy.2024-01-15.log` in the specified directory.
 
 ### Multi-Client Configuration
 
