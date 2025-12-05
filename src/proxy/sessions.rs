@@ -330,7 +330,9 @@ impl SessionManager {
                     session_id = %id,
                     user = %user_id.short(),
                     source = %source,
-                    "Creating explicit session (from hook)"
+                    "Creating explicit session (from hook) for user {} with session_id {}",
+                    user_id.short(),
+                    id
                 );
                 SessionKey::explicit(id)
             }
@@ -340,7 +342,9 @@ impl SessionManager {
                     session_key = %key,
                     user = %user_id.short(),
                     source = %source,
-                    "Creating implicit session (mid-restart recovery)"
+                    "Creating implicit session (mid-restart recovery) for user {} with session_key {}",
+                    user_id.short(),
+                    key
                 );
                 key
             }
@@ -353,7 +357,9 @@ impl SessionManager {
                     old_session = %old_key,
                     new_session = %key,
                     user = %user_id.short(),
-                    "Superseding existing session"
+                    "Superseding existing session for user {} with session_key {}",
+                    user_id.short(),
+                    old_key
                 );
                 old_session.end(EndReason::Superseded);
                 self.archive_session(old_session);
@@ -375,7 +381,9 @@ impl SessionManager {
                 session = %key,
                 user = %session.user_id.short(),
                 reason = %reason,
-                "Session ended"
+                "Session ended for user {} with session_key {}",
+                session.user_id.short(),
+                key
             );
             self.active_by_user.remove(&session.user_id);
             session.end(reason);
@@ -391,7 +399,9 @@ impl SessionManager {
                     session = %key,
                     user = %user_id.short(),
                     reason = %reason,
-                    "Session ended by user"
+                    "Session ended by user {} with session_key {}",
+                    user_id.short(),
+                    key
                 );
                 session.end(reason);
                 self.archive_session(session);
@@ -553,7 +563,9 @@ impl SessionManager {
                     session_key = %session.key,
                     old_user = "unknown",
                     new_user = %new_user_id,
-                    "Backfilled session user_id from request headers"
+                    "Backfilled session user_id from request headers for user {} with session_key {}",
+                    new_user_id.short(),
+                    session.key
                 );
                 session.user_id = new_user_id.clone();
 

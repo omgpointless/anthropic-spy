@@ -548,7 +548,7 @@ async fn proxy_handler(
         }
     }
 
-    tracing::debug!(
+    tracing::trace!(
         "Proxying {} {} -> {} (client: {:?})",
         method,
         uri,
@@ -635,7 +635,10 @@ async fn proxy_handler(
                 turn = ctx.turn_number,
                 tool_results = ctx.tool_result_count,
                 client = ctx.client_id,
-                "Transformer context"
+                "Transformer context: turn={:?} tool_results={:?} client={:?}",
+                ctx.turn_number.unwrap_or(0),
+                ctx.tool_result_count.unwrap_or(0),
+                ctx.client_id.unwrap_or("unknown")
             );
 
             match state.transformation.transform(&body_json, &ctx) {
@@ -848,7 +851,7 @@ async fn proxy_handler(
     };
 
     // Log forwarding summary
-    tracing::debug!(
+    tracing::trace!(
         "Forwarding: {} | body: {} bytes | auth: {} | format: {}",
         forward_url,
         body_size,

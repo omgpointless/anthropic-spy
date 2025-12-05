@@ -380,7 +380,8 @@ impl TagEditor {
         tracing::debug!(
             tags = ?tags,
             block_count = blocks.len(),
-            "apply_rules_remove_replace_only: parsed blocks"
+            "apply_rules_remove_replace_only: parsed blocks {:?}",
+            blocks.iter().map(|b| (&b.tag, b.content.chars().take(50).collect::<String>())).collect::<Vec<_>>()
         );
 
         // Apply Remove rules (only to blocks matching the rule's tag)
@@ -462,7 +463,8 @@ impl TagEditor {
             tags = ?tags,
             block_count = blocks.len(),
             blocks_summary = ?blocks.iter().map(|b| (&b.tag, b.content.chars().take(50).collect::<String>())).collect::<Vec<_>>(),
-            "apply_rules: parsed blocks"
+            "apply_rules: parsed blocks {:?}",
+            blocks.iter().map(|b| (&b.tag, b.content.chars().take(50).collect::<String>())).collect::<Vec<_>>()
         );
 
         // Apply Remove rules first (only to blocks matching the rule's tag)
@@ -472,12 +474,19 @@ impl TagEditor {
                     rule_tag = %tag,
                     rule_pattern = %pattern,
                     has_when = when.is_some(),
-                    "Processing Remove rule (apply_rules)"
+                    "Processing Remove rule (apply_rules) tag={:?} pattern={:?} when={:?}",
+                    tag,
+                    pattern,
+                    when
                 );
                 // Check conditions
                 if let Some(ref cond) = when {
                     if !cond.evaluate(ctx) {
-                        tracing::debug!("Remove rule skipped: condition not met");
+                        tracing::debug!("Remove rule skipped: condition not met for tag={:?} pattern={:?} when={:?}",
+                            tag,
+                            pattern,
+                            when
+                        );
                         continue;
                     }
                 }
@@ -494,7 +503,10 @@ impl TagEditor {
                             pattern = %pattern,
                             pattern_matches = pattern_matches,
                             should_remove = should_remove,
-                            "Remove rule: checking block"
+                            "Remove rule: checking block tag={:?} pattern={:?} when={:?}",
+                            b.tag,
+                            pattern,
+                            when
                         );
                     }
                     !should_remove
@@ -502,7 +514,10 @@ impl TagEditor {
                 if blocks.len() != before_len {
                     tracing::debug!(
                         removed = before_len - blocks.len(),
-                        "Blocks removed by Remove rule"
+                        "Blocks removed by Remove rule for tag={:?} pattern={:?} when={:?}",
+                        tag,
+                        pattern,
+                        when
                     );
                     modified = true;
                 }
@@ -521,6 +536,11 @@ impl TagEditor {
                 // Check conditions
                 if let Some(ref cond) = when {
                     if !cond.evaluate(ctx) {
+                        tracing::debug!("Replace rule skipped: condition not met for tag={:?} pattern={:?} when={:?}",
+                            tag,
+                            pattern,
+                            when
+                        );
                         continue;
                     }
                 }
@@ -548,6 +568,12 @@ impl TagEditor {
                 // Check conditions
                 if let Some(ref cond) = when {
                     if !cond.evaluate(ctx) {
+                        tracing::debug!("Inject rule skipped: condition not met for tag={:?} content={:?} position={:?} when={:?}",
+                            tag,
+                            content,
+                            position,
+                            when
+                        );
                         continue;
                     }
                 }
@@ -703,7 +729,7 @@ impl RequestTransformer for TagEditor {
 
                 let last_text_idx = text_block_indices.last().copied();
 
-                tracing::debug!(
+                tracing::trace!(
                     text_block_count = text_block_indices.len(),
                     text_block_indices = ?text_block_indices,
                     last_text_idx = ?last_text_idx,

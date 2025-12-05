@@ -583,13 +583,23 @@ pub async fn session_start(
         _ => SessionSource::Hook, // Default for explicit start
     };
 
+    tracing::debug!(
+        session_id = %request.session_id,
+        user_id = %request.user_id,
+        source = %source,
+        "Starting session via hook for user {} with session {}",
+        user_id.short(),
+        request.session_id
+    );
+
     let session = sessions.start_session(user_id, Some(request.session_id.clone()), source);
     let session_key = session.key.to_string();
 
     tracing::info!(
         session_id = %request.session_id,
-        user_id = %request.user_id,
-        "Session started via hook"
+        source = %source,
+        "Session started with session_key {}",
+        session_key
     );
 
     Ok(Json(SessionActionResponse {
