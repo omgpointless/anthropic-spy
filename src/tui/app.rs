@@ -16,7 +16,7 @@ use super::modal::Modal;
 use super::preset::{get_preset, Preset};
 use super::scroll::FocusablePanel;
 use super::streaming::StreamingStateMachine;
-use super::traits::{Handled, Interactive};
+use super::traits::{Handled, Interactive, Zoomable};
 use crate::config::Config;
 use crate::events::{ProxyEvent, Stats, TrackedEvent};
 use crate::logging::LogBuffer;
@@ -116,6 +116,9 @@ pub struct App {
 
     /// Selected tab in Stats view (0=Overview, 1=Models, 2=Tokens, 3=Tools, 4=Trends)
     pub stats_selected_tab: usize,
+
+    /// Whether the focused panel is currently zoomed (expanded to full content area)
+    pub zoomed: bool,
 
     // ─────────────────────────────────────────────────────────────────────────
     // Appearance & Animation
@@ -236,6 +239,7 @@ impl App {
             view: View::default(),
             focused: FocusablePanel::default(),
             stats_selected_tab: 0, // Default to Overview tab
+            zoomed: false,
             theme,
             theme_config,
             config,
@@ -794,6 +798,46 @@ impl App {
             FocusablePanel::Thinking => self.thinking_panel.focus_hint(),
             FocusablePanel::Logs => self.logs_panel.focus_hint(),
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Zoom
+    // Panel expansion to full content area
+    // ─────────────────────────────────────────────────────────────
+
+    /// Check if the currently focused panel can be zoomed
+    pub fn can_zoom_focused(&self) -> bool {
+        match self.focused {
+            FocusablePanel::Events => self.events_panel.can_zoom(),
+            FocusablePanel::Thinking => self.thinking_panel.can_zoom(),
+            FocusablePanel::Logs => self.logs_panel.can_zoom(),
+        }
+    }
+
+    /// Get the zoom label for the currently focused panel
+    ///
+    /// Returns the label to display in title bar when zoomed.
+    pub fn zoom_label(&self) -> Option<&'static str> {
+        if !self.zoomed {
+            return None;
+        }
+        Some(match self.focused {
+            FocusablePanel::Events => self.events_panel.zoom_label(),
+            FocusablePanel::Thinking => self.thinking_panel.zoom_label(),
+            FocusablePanel::Logs => self.logs_panel.zoom_label(),
+        })
+    }
+
+    /// Toggle zoom state for the currently focused panel
+    pub fn toggle_zoom(&mut self) {
+        if self.can_zoom_focused() {
+            self.zoomed = !self.zoomed;
+        }
+    }
+
+    /// Exit zoom mode (called on Esc)
+    pub fn exit_zoom(&mut self) {
+        self.zoomed = false;
     }
 
     /// Extract topic info from a Haiku response body

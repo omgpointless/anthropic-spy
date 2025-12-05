@@ -641,20 +641,27 @@ async fn proxy_handler(
                 ctx.client_id.unwrap_or("unknown")
             );
 
+            tracing::debug!(
+                transformers = ?state.transformation.transformer_names(),
+                "Running transformation pipeline on request"
+            );
             match state.transformation.transform(&body_json, &ctx) {
                 transformation::TransformResult::Modified {
                     body: new_body,
                     tokens,
                 } => {
                     if let Some(t) = tokens {
-                        tracing::debug!(
+                        tracing::info!(
                             tokens_before = t.before,
                             tokens_after = t.after,
                             delta = t.delta(),
-                            "Request transformed by pipeline (pre-translation)"
+                            "✓ Request transformed: {} tokens → {} tokens (Δ{})",
+                            t.before,
+                            t.after,
+                            t.delta()
                         );
                     } else {
-                        tracing::debug!("Request transformed by pipeline (pre-translation)");
+                        tracing::info!("✓ Request transformed (no token tracking)");
                     }
                     (
                         serde_json::to_vec(&new_body).unwrap_or_else(|_| body_bytes.to_vec()),

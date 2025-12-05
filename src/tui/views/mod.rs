@@ -17,6 +17,7 @@ pub(crate) use events::{format_event_detail, format_event_line};
 
 use super::app::{App, View};
 use super::preset::Panel;
+use super::scroll::FocusablePanel;
 use crate::tui::components;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
@@ -65,7 +66,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     for (i, panel) in panel_map.iter().enumerate() {
         match panel {
             Some(Panel::Title) => components::render_title(f, chunks[i], app),
-            Some(Panel::Logs) => components::render_logs_panel(f, chunks[i], app),
+            Some(Panel::Logs) => {
+                // Skip logs in shell when zoomed on logs (it's rendered in content area)
+                if !(app.zoomed && app.focused == FocusablePanel::Logs) {
+                    components::render_logs_panel(f, chunks[i], app);
+                }
+            }
             Some(Panel::ContextBar) => components::render_context_bar(f, chunks[i], app),
             Some(Panel::Status) => components::render_status(f, chunks[i], app),
             None => content_area = Some(chunks[i]), // Content slot

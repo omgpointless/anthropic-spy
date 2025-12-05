@@ -303,6 +303,7 @@ impl TransformationPipeline {
     /// `TransformResult::Block { ... }` if any transformer blocked the request.
     ///
     /// Uses `Cow` internally to avoid cloning when all transformers pass through.
+    /// Accumulates token deltas from all transformers that report them.
     pub fn transform<'a>(&self, body: &'a Value, ctx: &TransformContext) -> TransformResult {
         if self.transformers.is_empty() {
             return TransformResult::Unchanged;
@@ -310,23 +311,50 @@ impl TransformationPipeline {
 
         // Track whether we've had to clone yet
         let mut current: Cow<'a, Value> = Cow::Borrowed(body);
+        // Accumulate token deltas across transformers
+        let mut total_tokens_before: u32 = 0;
+        let mut total_tokens_after: u32 = 0;
+        let mut any_tokens_tracked = false;
 
         for transformer in &self.transformers {
             // Fast-path: skip if transformer doesn't apply
             if !transformer.should_apply(ctx) {
+                tracing::trace!(
+                    transformer = transformer.name(),
+                    "Transformer skipped (should_apply=false)"
+                );
                 continue;
             }
 
             match transformer.transform(current.as_ref(), ctx) {
                 TransformResult::Unchanged => {
+                    tracing::debug!(
+                        transformer = transformer.name(),
+                        "Transformer returned Unchanged"
+                    );
                     // No change, keep current (borrowed or owned)
                 }
                 TransformResult::Modified { body, tokens } => {
-                    tracing::debug!(
-                        transformer = transformer.name(),
-                        tokens_delta = tokens.map(|t| t.delta()).unwrap_or(0),
-                        "Request body transformed"
-                    );
+                    if let Some(t) = tokens {
+                        tracing::info!(
+                            transformer = transformer.name(),
+                            tokens_before = t.before,
+                            tokens_after = t.after,
+                            delta = t.delta(),
+                            "Transformer modified request: {} tokens → {} tokens (Δ{})",
+                            t.before,
+                            t.after,
+                            t.delta()
+                        );
+                        total_tokens_before += t.before;
+                        total_tokens_after += t.after;
+                        any_tokens_tracked = true;
+                    } else {
+                        tracing::info!(
+                            transformer = transformer.name(),
+                            "Transformer modified request (no token tracking)"
+                        );
+                    }
                     current = Cow::Owned(body);
                 }
                 TransformResult::Block { reason, status } => {
@@ -356,10 +384,20 @@ impl TransformationPipeline {
             }
         }
 
-        // Convert Cow back to TransformResult
+        // Convert Cow back to TransformResult, preserving accumulated token info
         match current {
             Cow::Borrowed(_) => TransformResult::Unchanged,
-            Cow::Owned(modified) => TransformResult::modified(modified),
+            Cow::Owned(modified) => {
+                if any_tokens_tracked {
+                    TransformResult::modified_with_tokens(
+                        modified,
+                        total_tokens_before,
+                        total_tokens_after,
+                    )
+                } else {
+                    TransformResult::modified(modified)
+                }
+            }
         }
     }
 
@@ -369,7 +407,6 @@ impl TransformationPipeline {
     }
 
     /// Get names of registered transformers (for logging/debug)
-    #[allow(dead_code)]
     pub fn transformer_names(&self) -> Vec<&'static str> {
         self.transformers.iter().map(|t| t.name()).collect()
     }

@@ -32,6 +32,7 @@
 //! - [`Scrollable`] - Components with scrollable content
 //! - [`Copyable`] - Components that provide clipboard content
 //! - [`Interactive`] - Components that handle keyboard input
+//! - [`Zoomable`] - Components that can expand to full content area
 //!
 //! # Migration Path
 //!
@@ -45,8 +46,10 @@ mod component;
 mod copyable;
 mod interactive;
 mod scrollable;
+mod zoomable;
 
 pub use component::{Component, ComponentId, RenderContext};
 pub use copyable::Copyable;
 pub use interactive::{Handled, Interactive};
 pub use scrollable::{Scrollable, Selectable};
+pub use zoomable::Zoomable;

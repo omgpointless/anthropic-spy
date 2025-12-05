@@ -18,6 +18,7 @@ use crate::theme::Theme;
 use crate::tui::scroll::{FocusablePanel, ScrollState};
 use crate::tui::traits::{
     Component, ComponentId, Copyable, Handled, Interactive, RenderContext, Scrollable, Selectable,
+    Zoomable,
 };
 use crate::tui::views::format_event_line;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -389,7 +390,13 @@ impl Interactive for EventsPanel {
     }
 
     fn focus_hint(&self) -> Option<&'static str> {
-        Some("↑↓:select  g/G:top/end  Enter:detail  y:copy  Esc:follow")
+        Some("↑↓:select  g/G:top/end  Enter:detail  y:copy  z:zoom  Esc:follow")
+    }
+}
+
+impl Zoomable for EventsPanel {
+    fn zoom_label(&self) -> &'static str {
+        "Events"
     }
 }
 

@@ -11,7 +11,7 @@ use crate::tui::markdown;
 use crate::tui::scroll::{FocusablePanel, ScrollState};
 use crate::tui::streaming::StreamingState;
 use crate::tui::traits::{
-    Component, ComponentId, Copyable, Handled, Interactive, RenderContext, Scrollable,
+    Component, ComponentId, Copyable, Handled, Interactive, RenderContext, Scrollable, Zoomable,
 };
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -208,7 +208,13 @@ impl Interactive for ThinkingPanel {
     }
 
     fn focus_hint(&self) -> Option<&'static str> {
-        Some("↑↓:scroll  g/G:top/end  y:copy")
+        Some("↑↓:scroll  g/G:top/end  y:copy  z:zoom")
+    }
+}
+
+impl Zoomable for ThinkingPanel {
+    fn zoom_label(&self) -> &'static str {
+        "Thinking"
     }
 }
 

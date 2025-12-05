@@ -17,6 +17,7 @@ use crate::theme::Theme;
 use crate::tui::scroll::ScrollState;
 use crate::tui::traits::{
     Component, ComponentId, Copyable, Handled, Interactive, RenderContext, Scrollable, Selectable,
+    Zoomable,
 };
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
@@ -308,7 +309,13 @@ impl Interactive for LogsPanel {
     }
 
     fn focus_hint(&self) -> Option<&'static str> {
-        Some("↑↓:select  g/G:top/end  y:copy  Esc:follow")
+        Some("↑↓:select  g/G:top/end  y:copy  z:zoom  Esc:follow")
+    }
+}
+
+impl Zoomable for LogsPanel {
+    fn zoom_label(&self) -> &'static str {
+        "Logs"
     }
 }
 

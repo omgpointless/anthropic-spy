@@ -53,6 +53,17 @@ impl RenderableContent {
 
 /// Main render function for the Events view
 pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
+    // When zoomed, render only the focused panel at full size
+    if app.zoomed {
+        match app.focused {
+            FocusablePanel::Events => render_list_view(f, area, app),
+            FocusablePanel::Thinking => render_thinking_panel(f, area, app),
+            FocusablePanel::Logs => render_logs_panel(f, area, app),
+        }
+        return;
+    }
+
+    // Normal mode: use preset layout
     let bp = Breakpoint::from_width(area.width);
 
     // Get layout from preset
@@ -108,6 +119,18 @@ fn render_list_view(f: &mut Frame, area: Rect, app: &App) {
 /// Render the thinking panel using the ThinkingPanel component
 fn render_thinking_panel(f: &mut Frame, area: Rect, app: &mut App) {
     super::super::components::thinking_panel::render(f, area, app);
+}
+
+// ============================================================================
+// Logs panel (for zoom mode)
+// ============================================================================
+
+/// Render the logs panel when zoomed
+///
+/// Normally logs are in the shell footer, but when zoomed they take
+/// the full content area.
+fn render_logs_panel(f: &mut Frame, area: Rect, app: &mut App) {
+    super::super::components::logs_panel::render(f, area, app);
 }
 
 // ============================================================================

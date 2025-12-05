@@ -161,7 +161,13 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) {
             match key {
                 KeyCode::Esc => {
                     if app.handle_key_press(key) {
-                        // Esc: first let focused panel handle it (clear selection)
+                        // Esc priority: zoom > panel selection > view navigation
+                        if app.zoomed {
+                            // Exit zoom mode
+                            app.exit_zoom();
+                            return;
+                        }
+                        // Esc: let focused panel handle it (clear selection)
                         // If panel didn't handle it, fall back to view navigation
                         let key_event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
                         if app.dispatch_to_focused(key_event) == Handled::No {
@@ -278,6 +284,13 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) {
                                 };
                             }
                         }
+                    }
+                    return;
+                }
+                // 'z' - toggle zoom for focused panel (Events view only)
+                KeyCode::Char('z') => {
+                    if app.handle_key_press(key) && app.view == View::Events {
+                        app.toggle_zoom();
                     }
                     return;
                 }
