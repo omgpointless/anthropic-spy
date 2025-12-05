@@ -13,6 +13,7 @@ use crate::theme::Theme;
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use unicode_width::UnicodeWidthStr;
 
 /// A segment of parsed markdown with semantic meaning
 #[derive(Debug, Clone)]
@@ -457,6 +458,8 @@ pub fn parse_markdown(markdown: &str) -> Vec<StyledSegment> {
 
 /// Wrap text to fit within width, breaking at word boundaries
 /// Preserves leading/trailing whitespace to maintain spacing between segments
+///
+/// Uses unicode display width for correct handling of emojis, CJK, etc.
 fn wrap_text(text: &str, width: usize) -> Vec<String> {
     if width == 0 || text.is_empty() {
         return vec![text.to_string()];
@@ -468,26 +471,30 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
 
     let mut result = Vec::new();
     let mut current_line = String::new();
+    let mut current_width = 0usize;
 
     // Start with leading space if present
     if leading_space {
         current_line.push(' ');
+        current_width = 1;
     }
 
     for word in text.split_whitespace() {
-        if current_line.is_empty()
-            || (current_line.len() == 1 && leading_space && result.is_empty())
-        {
+        let word_width = word.width();
+        if current_line.is_empty() || (current_width == 1 && leading_space && result.is_empty()) {
             // First word (possibly after leading space)
             current_line.push_str(word);
-        } else if current_line.len() + 1 + word.len() <= width {
-            // Word fits on current line
+            current_width += word_width;
+        } else if current_width + 1 + word_width <= width {
+            // Word fits on current line (1 for space separator)
             current_line.push(' ');
             current_line.push_str(word);
+            current_width += 1 + word_width;
         } else {
             // Word doesn't fit - start new line
             result.push(current_line);
             current_line = word.to_string();
+            current_width = word_width;
         }
     }
 
@@ -584,8 +591,10 @@ pub fn segments_to_lines(
 
                         for (j, wrapped_line) in wrapped.iter().enumerate() {
                             // Check if this segment will fit on current line
+                            // Use unicode width for correct display width
+                            let line_width = wrapped_line.width();
                             let needs_new_line =
-                                current_width > 0 && current_width + wrapped_line.len() > width;
+                                current_width > 0 && current_width + line_width > width;
 
                             if j > 0 || needs_new_line {
                                 // Start new line
@@ -594,7 +603,7 @@ pub fn segments_to_lines(
                             }
 
                             current_spans.push(Span::raw(wrapped_line.clone()));
-                            current_width += wrapped_line.len();
+                            current_width += line_width;
                         }
                     }
                     // Newline in text = new line (except for last part)
@@ -611,7 +620,7 @@ pub fn segments_to_lines(
                     code.clone(),
                     Style::default().fg(theme.code_inline),
                 ));
-                current_width += code.len();
+                current_width += code.width();
             }
 
             StyledSegment::CodeBlock { lang, code } => {
@@ -695,7 +704,7 @@ pub fn segments_to_lines(
                 } else {
                     format!("{}• ", indent)
                 };
-                current_width = marker.len();
+                current_width = marker.width();
                 current_spans.push(Span::styled(marker, Style::default().fg(theme.border)));
             }
 
@@ -711,7 +720,7 @@ pub fn segments_to_lines(
                     text.clone(),
                     Style::default().add_modifier(Modifier::BOLD),
                 ));
-                current_width += text.len();
+                current_width += text.width();
             }
 
             StyledSegment::Italic(text) => {
@@ -720,7 +729,7 @@ pub fn segments_to_lines(
                     text.clone(),
                     Style::default().add_modifier(Modifier::ITALIC),
                 ));
-                current_width += text.len();
+                current_width += text.width();
             }
 
             StyledSegment::Strikethrough(text) => {
@@ -731,7 +740,7 @@ pub fn segments_to_lines(
                         .add_modifier(Modifier::CROSSED_OUT)
                         .add_modifier(Modifier::DIM),
                 ));
-                current_width += text.len();
+                current_width += text.width();
             }
 
             StyledSegment::BlockQuoteStart => {
@@ -778,7 +787,7 @@ pub fn segments_to_lines(
                         .fg(theme.highlight)
                         .add_modifier(Modifier::UNDERLINED),
                 ));
-                current_width += display.len();
+                current_width += display.width();
             }
 
             StyledSegment::TableStart { .. } => {
