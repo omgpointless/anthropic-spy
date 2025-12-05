@@ -44,20 +44,20 @@ impl ContextWarningAugmenter {
     }
 
     /// Generate tiered message based on usage percentage
-    fn format_message(&self, percent: u8, current_k: u64, limit_k: u64) -> String {
+    fn format_message(&self, percent: u8, current: u64, limit: u64) -> String {
         match percent {
             95.. => format!(
-                "Context at ~{}% ({}K/{}K). `/aspy:tempcontext` recommended.",
-                percent, current_k, limit_k
+                "User! Context is now at ~{}% ({}/{}). Aspy recommends you execute `/aspy:pre-compact` before 98% to ensure continuity and advices to not start complex tool flows.\n",
+                percent, current, limit
             ),
             85..=94 => format!(
-                "Context at ~{}% ({}K/{}K). Consider `/aspy:tempcontext` soon.",
-                percent, current_k, limit_k
+                "For user's consideration, context is at ~{}% ({}/{}).",
+                percent, current, limit
             ),
-            80..=84 => format!("Context at {}% ({}K/{}K).", percent, current_k, limit_k),
+            80..=84 => format!("Context at {}% ({}/{}).", percent, current, limit),
             _ => format!(
-                "Context now at ~{}% ({}K/{}K). Halfway there 🚀",
-                percent, current_k, limit_k
+                "For user's information, context now at ~{}% ({}/{}). Halfway there 🚀",
+                percent, current, limit
             ),
         }
     }
@@ -65,9 +65,9 @@ impl ContextWarningAugmenter {
     /// Build the annotation text with styled borders
     fn format_annotation(&self, message: &str) -> String {
         format!(
-            "\n\n`★ aspy (context) ─────────────────────────────────────`\n\
+            "\n\n`★ aspy (context-warning augmentation) ────────────────`\n\
              {}\n\
-             `─────────────────────────────────────────────────────────`",
+             `───────────────────────────────────────────────────────`",
             message
         )
     }
@@ -134,8 +134,8 @@ impl Augmenter for ContextWarningAugmenter {
 
         // Calculate values for message
         let percent = threshold;
-        let current_k = state.current_tokens / 1000;
-        let limit_k = state.limit / 1000;
+        let current = state.current_tokens;
+        let limit = state.limit;
 
         // Mark that we warned at this threshold (prevents duplicate warnings)
         state.mark_warned(threshold);
@@ -144,14 +144,14 @@ impl Augmenter for ContextWarningAugmenter {
         drop(state);
 
         // Generate the message and annotation
-        let message = self.format_message(percent, current_k, limit_k);
+        let message = self.format_message(percent, current, limit);
         let annotation = self.format_annotation(&message);
 
         tracing::info!(
-            "Context warning: {}% ({}K/{}K) at block #{}",
+            "Context warning: {}% ({}/{}) at block #{}",
             percent,
-            current_k,
-            limit_k,
+            current,
+            limit,
             ctx.next_block_index
         );
 

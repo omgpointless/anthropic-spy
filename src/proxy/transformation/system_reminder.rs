@@ -451,7 +451,7 @@ impl TagEditor {
                 let removed_count = before_len - blocks.len();
                 if removed_count > 0 {
                     tracing::debug!(removed = removed_count, "Blocks removed");
-                    modifications.push(format!("Removed {} <{}> block(s)", removed_count, tag));
+                    modifications.push(format!("Removed {} <{}/> tag(s)", removed_count, tag));
                     modified = true;
                 }
             }
@@ -484,7 +484,7 @@ impl TagEditor {
                     }
                 }
                 if replace_count > 0 {
-                    modifications.push(format!("Modified {} <{}> block(s)", replace_count, tag));
+                    modifications.push(format!("Modified {} <{}/> tag(s)", replace_count, tag));
                 }
             }
         }
@@ -575,7 +575,7 @@ impl TagEditor {
                         pattern,
                         when
                     );
-                    modifications.push(format!("Removed {} <{}> block(s)", removed_count, tag));
+                    modifications.push(format!("Removed {} <{}/> tag(s)", removed_count, tag));
                     modified = true;
                 }
             }
@@ -613,7 +613,7 @@ impl TagEditor {
                     }
                 }
                 if replace_count > 0 {
-                    modifications.push(format!("Modified {} <{}> block(s)", replace_count, tag));
+                    modifications.push(format!("Modified {} <{}/> tag(s)", replace_count, tag));
                 }
             }
         }
@@ -661,7 +661,7 @@ impl TagEditor {
                 };
 
                 blocks.insert(insert_idx, new_block);
-                modifications.push(format!("Injected <{}> block", tag));
+                modifications.push(format!("Injected <{}/>", tag));
                 modified = true;
             }
         }
