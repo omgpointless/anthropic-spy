@@ -261,12 +261,6 @@ pub struct Stats {
     /// A "fresh" turn = user prompt with no tool_result blocks (not a tool continuation)
     pub turn_count: u64,
 
-    // Current model being used (for cost calculation)
-    pub current_model: Option<String>,
-
-    // Most recent thinking content (for display panel)
-    pub current_thinking: Option<String>,
-
     // === Session metadata ===
     /// When the session started (absolute time for reports)
     pub session_started: Option<DateTime<Utc>>,
@@ -354,28 +348,30 @@ impl Stats {
             + self.total_cache_read_tokens
     }
 
-    /// Calculate total cost based on current model
+    /// Calculate total cost across all models used
     pub fn total_cost(&self) -> f64 {
-        if let Some(ref model) = self.current_model {
-            crate::pricing::calculate_cost(
-                model,
-                self.total_input_tokens as u32,
-                self.total_output_tokens as u32,
-                self.total_cache_creation_tokens as u32,
-                self.total_cache_read_tokens as u32,
-            )
-        } else {
-            0.0
-        }
+        self.model_tokens
+            .iter()
+            .map(|(model, tokens)| {
+                crate::pricing::calculate_cost(
+                    model,
+                    tokens.input as u32,
+                    tokens.output as u32,
+                    tokens.cache_creation as u32,
+                    tokens.cache_read as u32,
+                )
+            })
+            .sum()
     }
 
-    /// Calculate cache savings
+    /// Calculate cache savings across all models used
     pub fn cache_savings(&self) -> f64 {
-        if let Some(ref model) = self.current_model {
-            crate::pricing::calculate_cache_savings(model, self.total_cache_read_tokens as u32)
-        } else {
-            0.0
-        }
+        self.model_tokens
+            .iter()
+            .map(|(model, tokens)| {
+                crate::pricing::calculate_cache_savings(model, tokens.cache_read as u32)
+            })
+            .sum()
     }
 
     /// Calculate cache hit percentage (cached / (cached + input))
@@ -512,7 +508,6 @@ impl Stats {
                 self.total_output_tokens += *output_tokens as u64;
                 self.total_cache_creation_tokens += *cache_creation_tokens as u64;
                 self.total_cache_read_tokens += *cache_read_tokens as u64;
-                self.current_model = Some(model.clone());
 
                 // Update context tracking
                 self.current_context_tokens = (*input_tokens + *cache_read_tokens) as u64;
@@ -547,14 +542,9 @@ impl Stats {
                     self.cache_rate_history.pop_front();
                 }
             }
-            ProxyEvent::Thinking {
-                token_estimate,
-                content,
-                ..
-            } => {
+            ProxyEvent::Thinking { token_estimate, .. } => {
                 self.thinking_blocks += 1;
                 self.thinking_tokens += *token_estimate as u64;
-                self.current_thinking = Some(content.clone());
 
                 // === Historical tracking for sparklines ===
                 self.thinking_token_history
@@ -625,8 +615,7 @@ impl Stats {
             *self.tool_calls_by_name.entry(tool.clone()).or_default() += count;
         }
 
-        // Note: tool_durations_ms, current_thinking, current_model not merged
-        // These are "current state" fields, not aggregatable
+        // Note: tool_durations_ms not merged (timing data not aggregatable)
 
         // Merge Aspy modification stats
         self.transform_stats.tokens_injected += other.transform_stats.tokens_injected;
@@ -672,8 +661,6 @@ impl Default for Stats {
             thinking_blocks: 0,
             thinking_tokens: 0,
             turn_count: 0,
-            current_model: None,
-            current_thinking: None,
             session_started: None,
             model_calls: HashMap::new(),
             model_tokens: HashMap::new(),

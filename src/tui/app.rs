@@ -294,7 +294,7 @@ impl App {
 
     /// Get current thinking content for display
     /// Returns streaming content if available for the selected session,
-    /// otherwise last completed thinking block
+    /// otherwise last completed thinking block from filtered events
     pub fn current_thinking_content(&self) -> Option<String> {
         // Get the current session to filter by
         let session = self.effective_session();
@@ -320,8 +320,18 @@ impl App {
                 }
             }
         }
-        // Fall back to completed thinking
-        self.stats.current_thinking.clone()
+
+        // Fall back to last completed thinking from filtered events (session-aware)
+        self.filtered_events()
+            .iter()
+            .rev() // Search from most recent
+            .find_map(|tracked| {
+                if let ProxyEvent::Thinking { content, .. } = &tracked.event {
+                    Some(content.clone())
+                } else {
+                    None
+                }
+            })
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -535,9 +545,6 @@ impl App {
                 self.stats.total_cache_creation_tokens += *cache_creation_tokens as u64;
                 self.stats.total_cache_read_tokens += *cache_read_tokens as u64;
 
-                // Update current model (use the most recent one)
-                self.stats.current_model = Some(model.clone());
-
                 // Track context only for non-Haiku models (Opus/Sonnet carry the conversation)
                 // Haiku is used for quick side-tasks and doesn't reflect actual context usage
                 // Note: Compact detection moved to Parser layer for proper logging
@@ -566,19 +573,12 @@ impl App {
 
                 self.streaming_sm.on_api_usage();
             }
-            ProxyEvent::Thinking {
-                content,
-                token_estimate,
-                ..
-            } => {
+            ProxyEvent::Thinking { token_estimate, .. } => {
                 // Track thinking blocks (stats only - no state transition)
                 // This event arrives post-stream from the parser with complete content.
                 // ThinkingStarted handles real-time state; ApiUsage is the terminal event.
                 self.stats.thinking_blocks += 1;
                 self.stats.thinking_tokens += *token_estimate as u64;
-
-                // Store current thinking for the dedicated panel
-                self.stats.current_thinking = Some(content.clone());
             }
             ProxyEvent::ThinkingStarted { .. } => {
                 self.streaming_sm.on_thinking_started();
@@ -745,6 +745,8 @@ impl App {
             if let Some(idx) = self.active_sessions.iter().position(|s| s == current) {
                 let next_idx = (idx + 1) % self.active_sessions.len();
                 self.selected_session = Some(self.active_sessions[next_idx].clone());
+                // Reset to auto-follow mode for the new session's events
+                self.events_panel.selected = None;
             }
         }
     }
@@ -762,6 +764,8 @@ impl App {
                     idx - 1
                 };
                 self.selected_session = Some(self.active_sessions[prev_idx].clone());
+                // Reset to auto-follow mode for the new session's events
+                self.events_panel.selected = None;
             }
         }
     }
@@ -790,7 +794,8 @@ impl App {
         // Events/Stats view: dispatch based on focused panel
         match self.focused {
             FocusablePanel::Events => {
-                self.events_panel.sync_events(self.events.len());
+                // Use filtered count (current session) not total count (all sessions)
+                self.events_panel.sync_events(self.filtered_events().len());
                 self.events_panel.handle_key(key)
             }
             FocusablePanel::Thinking => self.thinking_panel.handle_key(key),
