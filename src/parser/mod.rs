@@ -16,14 +16,18 @@ use tokio::sync::Mutex;
 /// Type alias for pending tool calls map: tool_use_id -> (tool_name, start_time)
 type PendingCallsMap = HashMap<String, (String, chrono::DateTime<Utc>)>;
 
-/// State for context compact detection
+/// State for context compact detection (per-user)
 /// Tracks total cache tokens (read + creation) from non-Haiku models
+#[derive(Default)]
 struct CompactDetectionState {
     /// Last seen total cache (cache_read + cache_creation) for compact detection
     last_cached_tokens: u64,
     /// Last known context size before potential compact
     last_context_tokens: u64,
 }
+
+/// Type alias for per-user compact detection state map
+type CompactStateMap = HashMap<String, CompactDetectionState>;
 
 /// Tracks tool calls and their timing to correlate calls with results
 ///
@@ -34,18 +38,16 @@ pub struct Parser {
     /// Maps tool_use_id -> (tool_name, start_time)
     /// Arc<Mutex<>> allows sharing mutable state across async tasks
     pending_calls: Arc<Mutex<PendingCallsMap>>,
-    /// State for detecting context compaction events
-    compact_state: Arc<Mutex<CompactDetectionState>>,
+    /// Per-user state for detecting context compaction events
+    /// Keyed by user_id (api_key_hash) to isolate state between users
+    compact_state: Arc<Mutex<CompactStateMap>>,
 }
 
 impl Parser {
     pub fn new() -> Self {
         Self {
             pending_calls: Arc::new(Mutex::new(HashMap::new())),
-            compact_state: Arc::new(Mutex::new(CompactDetectionState {
-                last_cached_tokens: 0,
-                last_context_tokens: 0,
-            })),
+            compact_state: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -61,9 +63,13 @@ impl Parser {
     /// context size is unchanged. A real compact drops the TOTAL, not just the
     /// read portion.
     ///
+    /// State is tracked per-user (by api_key_hash) to isolate sessions and prevent
+    /// cross-user false positives when proxy restarts or multiple users are active.
+    ///
     /// Returns Some(ContextCompact) if compact detected, None otherwise
     async fn check_for_compact(
         &self,
+        user_id: Option<&str>,
         model: &str,
         input_tokens: u32,
         cache_read_tokens: u32,
@@ -74,7 +80,12 @@ impl Parser {
             return None;
         }
 
-        let mut state = self.compact_state.lock().await;
+        // Use user_id as key, or "unknown" for anonymous requests
+        let user_key = user_id.unwrap_or("unknown").to_string();
+
+        let mut state_map = self.compact_state.lock().await;
+        let state = state_map.entry(user_key).or_default();
+
         // Total cache = read + creation (cache expiry moves tokens between these)
         let total_cache = cache_read_tokens as u64 + cache_creation_tokens as u64;
         let current_context = input_tokens as u64 + total_cache;
@@ -82,7 +93,12 @@ impl Parser {
 
         // Detect significant cache drop (compact doesn't always go to zero)
         // Triggers on: >30% drop OR >30K absolute drop
+        // IMPORTANT: total_cache must be > 0 to distinguish from new sessions.
+        // A real compact creates new cache (the summary), while a fresh session
+        // starts with zero cache. This prevents false positives when a user
+        // starts a new Claude Code session while Aspy is still running.
         let significant_drop = prev_cache > 10_000
+            && total_cache > 0
             && (total_cache < prev_cache.saturating_sub(30_000)
                 || total_cache < prev_cache * 70 / 100);
 
@@ -189,14 +205,20 @@ impl Parser {
     /// We store them in pending_calls so we can correlate with results later.
     ///
     /// This handles both regular JSON responses and Server-Sent Events (SSE) streaming.
-    pub async fn parse_response(&self, body: &[u8]) -> Result<Vec<ProxyEvent>> {
+    ///
+    /// The user_id parameter is used for per-user compact detection state.
+    pub async fn parse_response(
+        &self,
+        body: &[u8],
+        user_id: Option<&str>,
+    ) -> Result<Vec<ProxyEvent>> {
         // Try to detect if this is SSE format
         let body_str = std::str::from_utf8(body).unwrap_or("");
 
         if body_str.starts_with("event:") || body_str.contains("\nevent:") {
             // This is a streaming SSE response
             tracing::trace!("Detected SSE streaming response");
-            return self.parse_sse_response(body_str).await;
+            return self.parse_sse_response(body_str, user_id).await;
         }
 
         // Regular JSON response
@@ -252,6 +274,7 @@ impl Parser {
             // Check for context compaction before emitting ApiUsage
             if let Some(compact_event) = self
                 .check_for_compact(
+                    user_id,
                     &response.model,
                     usage.input_tokens,
                     cache_read,
@@ -285,7 +308,13 @@ impl Parser {
     /// - message_delta: Final usage data (output tokens)
     ///
     /// Key insight: We must ACCUMULATE deltas before emitting events!
-    async fn parse_sse_response(&self, body: &str) -> Result<Vec<ProxyEvent>> {
+    ///
+    /// The user_id parameter is used for per-user compact detection state.
+    async fn parse_sse_response(
+        &self,
+        body: &str,
+        user_id: Option<&str>,
+    ) -> Result<Vec<ProxyEvent>> {
         let mut events = Vec::new();
         let mut pending = self.pending_calls.lock().await;
 
@@ -556,6 +585,7 @@ impl Parser {
                 // Check for context compaction before emitting ApiUsage
                 if let Some(compact_event) = self
                     .check_for_compact(
+                        user_id,
                         &model_name,
                         input_tokens,
                         cache_read_tokens,
@@ -632,7 +662,7 @@ mod tests {
         }"#;
 
         let events = parser
-            .parse_response(response_json.as_bytes())
+            .parse_response(response_json.as_bytes(), None)
             .await
             .unwrap();
 

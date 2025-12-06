@@ -265,7 +265,7 @@ pub(crate) fn format_event_line(tracked: &TrackedEvent) -> String {
             ..
         } => {
             format!(
-                "[{}] {}⚖️  Rate Limits: Req={:?} Tok={:?}",
+                "[{}] {}⚖ Rate Limits: Req={:?} Tok={:?}",
                 timestamp.format("%H:%M:%S"),
                 user_prefix,
                 requests_remaining,
@@ -381,7 +381,7 @@ pub(crate) fn format_event_line(tracked: &TrackedEvent) -> String {
                 format!(" ({})", modifications.join(", "))
             };
             format!(
-                "[{}] {}⚙️ Transform [{}]: {}{}{}",
+                "[{}] {}⚙ Transform [{}]: {}{}{}",
                 timestamp.format("%H:%M:%S"),
                 user_prefix,
                 transformer,
@@ -626,7 +626,7 @@ pub(crate) fn format_event_detail(tracked: &TrackedEvent) -> RenderableContent {
             reset_time,
         } => {
             RenderableContent::Markdown(format!(
-                "{}## ⚖️ Rate Limit Update\n\n\
+                "{}## ⚖ Rate Limit Update\n\n\
                 **Timestamp:** {}\n\n\
                 ---\n\n\
                 **Requests:** {}/{}  \n\
@@ -787,7 +787,7 @@ pub(crate) fn format_event_detail(tracked: &TrackedEvent) -> RenderableContent {
                 format!("\n\n### Modifications\n\n{}", mods_list)
             };
             RenderableContent::Markdown(format!(
-                "{}## ⚙️ Request Transformed\n\n\
+                "{}## ⚙ Request Transformed\n\n\
                 **Timestamp:** {}  \n\
                 **Transformer:** `{}`\n\n\
                 ---\n\n\

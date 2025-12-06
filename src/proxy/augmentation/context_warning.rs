@@ -43,22 +43,29 @@ impl ContextWarningAugmenter {
         Self { thresholds }
     }
 
-    /// Generate tiered message based on usage percentage
-    fn format_message(&self, percent: u8, current: u64, limit: u64) -> String {
-        match percent {
+    /// Generate tiered message based on urgency level
+    ///
+    /// `urgency` is the threshold that was crossed (60, 80, 85, 90, 95) - used to select message tone.
+    /// The actual percentage is calculated from current/limit and displayed to the user.
+    fn format_message(&self, urgency: u8, current: u64, limit: u64) -> String {
+        // Calculate actual percentage, rounded to one decimal place
+        let actual_percent = if limit > 0 {
+            (current as f64 / limit as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        match urgency {
             95.. => format!(
-                "User! Context is now at ~{}% ({}/{}). Aspy recommends you execute `/aspy:pre-compact` before 98% to ensure continuity and advices to not start complex tool flows.\n",
-                percent, current, limit
+                "User! Context is now at {:.1}% ({}/{}). Aspy recommends you execute `/aspy:pre-compact` before 98% to ensure continuity and advices to not start complex tool flows.\n",
+                actual_percent, current, limit
             ),
             85..=94 => format!(
-                "For user's consideration, context is at ~{}% ({}/{}).",
-                percent, current, limit
+                "For user's consideration, context is at {:.1}% ({}/{}).",
+                actual_percent, current, limit
             ),
-            80..=84 => format!("Context at {}% ({}/{}).", percent, current, limit),
-            _ => format!(
-                "For user's information, context now at ~{}% ({}/{}). Halfway there 🚀",
-                percent, current, limit
-            ),
+            80..=84 => format!("Context at {:.1}% ({}/{}).", actual_percent, current, limit),
+            _ => format!("Context at {:.1}% ({}/{}).", actual_percent, current, limit),
         }
     }
 
@@ -133,7 +140,7 @@ impl Augmenter for ContextWarningAugmenter {
         let threshold = state.should_warn_at(&self.thresholds)?;
 
         // Calculate values for message
-        let percent = threshold;
+        let urgency = threshold;
         let current = state.current_tokens;
         let limit = state.limit;
 
@@ -144,12 +151,17 @@ impl Augmenter for ContextWarningAugmenter {
         drop(state);
 
         // Generate the message and annotation
-        let message = self.format_message(percent, current, limit);
+        let message = self.format_message(urgency, current, limit);
         let annotation = self.format_annotation(&message);
 
         tracing::info!(
-            "Context warning: {}% ({}/{}) at block #{}",
-            percent,
+            "Context warning: urgency={}, actual={:.1}% ({}/{}) at block #{}",
+            urgency,
+            if limit > 0 {
+                (current as f64 / limit as f64) * 100.0
+            } else {
+                0.0
+            },
             current,
             limit,
             ctx.next_block_index

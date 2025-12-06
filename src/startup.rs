@@ -329,7 +329,7 @@ fn print_feature_status(feature: &FeatureDefinition) {
 pub fn log_startup_with_registry(config: &Config, registry: &StartupRegistry) {
     // ASCII art header
     tracing::info!("═══════════════════════════════════");
-    tracing::info!("  🕵️  ASPY v{}", VERSION);
+    tracing::info!("  🔍 ASPY v{}", VERSION);
     tracing::info!("═══════════════════════════════════");
 
     // Module loading by category

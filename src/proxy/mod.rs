@@ -1309,7 +1309,10 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
 
         // Parse for tool calls, thinking blocks, usage, etc.
         if is_messages_endpoint {
-            if let Ok(events) = parser.parse_response(&accumulated).await {
+            if let Ok(events) = parser
+                .parse_response(&accumulated, user_id_clone.as_deref())
+                .await
+            {
                 for event in events {
                     // Update context state when we see ApiUsage (skip Haiku utility calls)
                     if let ProxyEvent::ApiUsage {
@@ -1478,7 +1481,11 @@ async fn handle_buffered_response(ctx: ResponseContext) -> Result<Response<Body>
 
     // Parse response for tool calls, assistant content, usage (uses translated body for correct format)
     if is_messages_endpoint && status.is_success() {
-        if let Ok(events) = state.parser.parse_response(&final_response_body).await {
+        if let Ok(events) = state
+            .parser
+            .parse_response(&final_response_body, user_id.as_deref())
+            .await
+        {
             for event in events {
                 // Update context state when we see ApiUsage (skip Haiku utility calls)
                 if let ProxyEvent::ApiUsage {

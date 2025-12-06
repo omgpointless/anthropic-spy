@@ -220,8 +220,8 @@ fn handle_key_event(app: &mut App, key_event: KeyEvent) {
                                             // Format like events: emoji heading, bold labels, separator, content
                                             let level_icon = match entry.level {
                                                 LogLevel::Error => "❌",
-                                                LogLevel::Warn => "⚠️",
-                                                LogLevel::Info => "ℹ️",
+                                                LogLevel::Warn => "⚠",
+                                                LogLevel::Info => "ℹ",
                                                 LogLevel::Debug => "🔍",
                                                 LogLevel::Trace => "📍",
                                             };
