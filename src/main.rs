@@ -29,6 +29,7 @@ use anyhow::Result;
 use chrono::Utc;
 use config::{Config, LogRotation};
 use logging::{LogBuffer, TuiLogLayer};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use storage::Storage;
 use tokio::sync::mpsc;
@@ -52,11 +53,11 @@ fn init_subscriber_without_file(filter: EnvFilter, enable_tui: bool, log_buffer:
     }
 }
 
-/// Shared buffer for streaming thinking content
-/// The proxy writes to this as thinking_delta events arrive,
-/// and the TUI reads from it each render frame for real-time display
-/// Uses std::sync::Mutex for sync access in render loop
-pub type StreamingThinking = Arc<Mutex<String>>;
+/// Shared buffer for streaming thinking content per session
+/// The proxy writes to this as thinking_delta events arrive (keyed by user_id),
+/// and the TUI reads from it each render frame for real-time display.
+/// Uses std::sync::Mutex for sync access in render loop.
+pub type StreamingThinking = Arc<Mutex<HashMap<String, String>>>;
 
 /// Shared context state for interceptor injection
 /// Parser updates this when ApiUsage arrives, interceptor reads when processing requests
@@ -272,9 +273,9 @@ async fn main() -> Result<()> {
     // This is a oneshot channel - it can only send one signal
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
-    // Create shared buffer for streaming thinking content
-    // Proxy writes thinking_delta content here, TUI reads it for real-time display
-    let streaming_thinking: StreamingThinking = Arc::new(Mutex::new(String::new()));
+    // Create shared buffer for streaming thinking content (per session)
+    // Proxy writes thinking_delta content here keyed by user_id, TUI reads it for real-time display
+    let streaming_thinking: StreamingThinking = Arc::new(Mutex::new(HashMap::new()));
 
     // Create shared context state for interceptor injection
     // Parser updates this on ApiUsage, interceptor reads to decide injection

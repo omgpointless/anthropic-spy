@@ -101,12 +101,15 @@ pub fn render(f: &mut Frame, area: Rect, app: &mut App) {
 fn render_list_view(f: &mut Frame, area: Rect, app: &App) {
     use super::super::components::events_panel;
 
-    // Delegate to EventsPanel component
-    events_panel::render(
+    // Get filtered events for the selected session
+    let filtered = app.filtered_events();
+
+    // Delegate to EventsPanel component with filtered events
+    events_panel::render_filtered(
         f,
         area,
         &app.events_panel,
-        &app.events,
+        &filtered,
         &app.theme,
         app.is_focused(FocusablePanel::Events),
     );

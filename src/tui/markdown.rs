@@ -882,9 +882,58 @@ pub fn segments_to_lines(
     lines
 }
 
+/// Strip control characters that can cause TUI rendering artifacts
+///
+/// Removes:
+/// - Carriage return (`\r`) - causes cursor to jump to line start
+/// - Backspace (`\x08`) - causes cursor to move left
+/// - ANSI escape sequences (`\x1b[...`) - can cause cursor movement, color changes
+/// - Other ASCII control characters (except tab and newline)
+fn sanitize_for_tui(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            // Skip ANSI escape sequences entirely
+            '\x1b' => {
+                // Skip the escape character and everything until we hit a letter
+                // ANSI sequences are: ESC [ <params> <letter>
+                if chars.peek() == Some(&'[') {
+                    chars.next(); // consume '['
+                                  // Skip until we find a letter (the command terminator)
+                    while let Some(&next) = chars.peek() {
+                        chars.next();
+                        if next.is_ascii_alphabetic() {
+                            break;
+                        }
+                    }
+                }
+                // Also handle ESC without [ (some other escape sequences)
+            }
+            // Skip problematic control characters
+            '\r' | '\x08' | '\x7f' => {
+                // Skip carriage return, backspace, delete
+            }
+            // Skip other control characters except tab and newline
+            c if c.is_ascii_control() && c != '\t' && c != '\n' => {
+                // Skip bell, form feed, vertical tab, etc.
+            }
+            // Keep everything else
+            _ => result.push(ch),
+        }
+    }
+
+    result
+}
+
 /// High-level: parse markdown and convert directly to Lines
+///
+/// Sanitizes input to remove control characters that can cause TUI artifacts.
 pub fn render_markdown(markdown: &str, width: usize, theme: &Theme) -> Vec<Line<'static>> {
-    let segments = parse_markdown(markdown);
+    // Sanitize input to prevent control characters from corrupting TUI display
+    let sanitized = sanitize_for_tui(markdown);
+    let segments = parse_markdown(&sanitized);
     segments_to_lines(&segments, width, theme)
 }
 

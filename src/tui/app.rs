@@ -99,6 +99,16 @@ pub struct App {
     pub log_buffer: LogBuffer,
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Multi-Session Support
+    // Track and filter between multiple concurrent Claude sessions
+    // ─────────────────────────────────────────────────────────────────────────
+    /// Active sessions (non-"unknown" user_ids, ordered by first seen)
+    pub active_sessions: Vec<String>,
+
+    /// Currently selected session for viewing (None = auto-select first)
+    pub selected_session: Option<String>,
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Navigation & Selection
     // Where the user is in the UI and what they're looking at
     // ─────────────────────────────────────────────────────────────────────────
@@ -237,6 +247,8 @@ impl App {
             settings_panel: SettingsPanel::new(),
             input_handler: InputHandler::default(),
             log_buffer,
+            active_sessions: Vec::new(),
+            selected_session: None,
             topic: TopicInfo::default(),
             view: View::default(),
             focused: FocusablePanel::default(),
@@ -281,13 +293,30 @@ impl App {
     }
 
     /// Get current thinking content for display
-    /// Returns streaming content if available, otherwise last completed thinking block
+    /// Returns streaming content if available for the selected session,
+    /// otherwise last completed thinking block
     pub fn current_thinking_content(&self) -> Option<String> {
-        // First try streaming content (real-time)
+        // Get the current session to filter by
+        let session = self.effective_session();
+
+        // First try streaming content (real-time) for this session
         if let Some(ref streaming) = self.streaming_thinking {
             if let Ok(guard) = streaming.lock() {
-                if !guard.is_empty() {
-                    return Some(guard.clone());
+                // Try session-specific content first
+                if let Some(session_key) = session {
+                    if let Some(content) = guard.get(session_key) {
+                        if !content.is_empty() {
+                            return Some(content.clone());
+                        }
+                    }
+                }
+                // Fallback: if no session selected, try "unknown" key
+                if session.is_none() {
+                    if let Some(content) = guard.get("unknown") {
+                        if !content.is_empty() {
+                            return Some(content.clone());
+                        }
+                    }
                 }
             }
         }
@@ -420,6 +449,11 @@ impl App {
         // Set session start time on first event
         if self.stats.session_started.is_none() {
             self.stats.session_started = Some(chrono::Utc::now());
+        }
+
+        // Register session if user_id is known (non-"unknown")
+        if let Some(ref user_id) = tracked_event.user_id {
+            self.register_session(user_id);
         }
 
         // Extract the inner ProxyEvent for stats processing
@@ -660,6 +694,81 @@ impl App {
                 _ => {}
             }
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // Multi-Session Support
+    // ─────────────────────────────────────────────────────────────
+
+    /// Register a session as active (called when event arrives with non-unknown user_id)
+    ///
+    /// Sessions are tracked in order of first appearance. The first session
+    /// becomes automatically selected for viewing.
+    pub fn register_session(&mut self, user_id: &str) {
+        if user_id != "unknown" && !self.active_sessions.contains(&user_id.to_string()) {
+            self.active_sessions.push(user_id.to_string());
+            // Auto-select first session
+            if self.selected_session.is_none() {
+                self.selected_session = Some(user_id.to_string());
+            }
+        }
+    }
+
+    /// Get the effective selected session (first available if none explicitly selected)
+    pub fn effective_session(&self) -> Option<&str> {
+        self.selected_session
+            .as_deref()
+            .or_else(|| self.active_sessions.first().map(|s| s.as_str()))
+    }
+
+    /// Get filtered events for current session
+    ///
+    /// Returns references to events matching the currently selected session.
+    /// If no session is selected, returns all events.
+    pub fn filtered_events(&self) -> Vec<&TrackedEvent> {
+        match self.effective_session() {
+            Some(session) => self
+                .events
+                .iter()
+                .filter(|e| e.user_id.as_deref() == Some(session))
+                .collect(),
+            None => self.events.iter().collect(), // Show all if no session
+        }
+    }
+
+    /// Cycle to next session (wraps around)
+    pub fn next_session(&mut self) {
+        if self.active_sessions.len() <= 1 {
+            return;
+        }
+        if let Some(current) = &self.selected_session {
+            if let Some(idx) = self.active_sessions.iter().position(|s| s == current) {
+                let next_idx = (idx + 1) % self.active_sessions.len();
+                self.selected_session = Some(self.active_sessions[next_idx].clone());
+            }
+        }
+    }
+
+    /// Cycle to previous session (wraps around)
+    pub fn prev_session(&mut self) {
+        if self.active_sessions.len() <= 1 {
+            return;
+        }
+        if let Some(current) = &self.selected_session {
+            if let Some(idx) = self.active_sessions.iter().position(|s| s == current) {
+                let prev_idx = if idx == 0 {
+                    self.active_sessions.len() - 1
+                } else {
+                    idx - 1
+                };
+                self.selected_session = Some(self.active_sessions[prev_idx].clone());
+            }
+        }
+    }
+
+    /// Get the count of active sessions
+    pub fn session_count(&self) -> usize {
+        self.active_sessions.len()
     }
 
     // ─────────────────────────────────────────────────────────────

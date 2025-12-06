@@ -17,6 +17,7 @@ use ratatui::{
 /// - App name ("Aspy")
 /// - Streaming indicator (spinner + state) when active
 /// - Conversation topic (extracted from Haiku summarization)
+/// - Session indicator (right side, when multiple sessions active)
 /// - Zoom indicator (right side, hidden on small screens)
 pub fn render(f: &mut Frame, area: Rect, app: &App) {
     let bp = Breakpoint::from_width(area.width);
@@ -40,14 +41,32 @@ pub fn render(f: &mut Frame, area: Rect, app: &App) {
         None => format!(" 🐍 Aspy{}", streaming_indicator),
     };
 
-    // Build right-side indicator (zoom or help hint)
+    // Build session indicator (show when we have sessions)
+    let session_indicator = if let Some(session) = app.effective_session() {
+        let count = app.session_count();
+        if count > 1 {
+            // Multiple sessions: show name and count
+            format!("[{}] ({}) ", session, count)
+        } else {
+            // Single session: just show name
+            format!("[{}] ", session)
+        }
+    } else {
+        String::new()
+    };
+
+    // Build right-side indicator (session + zoom/help)
     // Only show on Normal+ screens to preserve space for title/topic
     let right_indicator = if bp.at_least(Breakpoint::Normal) {
-        if let Some(label) = app.zoom_label() {
-            format!(" 🔍 {} ", label)
+        let zoom_part = if let Some(label) = app.zoom_label() {
+            format!("🔍 {} ", label)
         } else {
-            " ? ".to_string()
-        }
+            "? ".to_string()
+        };
+        format!(" {}{}", session_indicator, zoom_part)
+    } else if !session_indicator.is_empty() {
+        // On smaller screens, still show session but skip zoom/help
+        format!(" {}", session_indicator)
     } else {
         String::new()
     };

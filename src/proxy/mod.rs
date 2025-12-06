@@ -1117,9 +1117,10 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                                 }
                                 // Emit ThinkingStarted immediately for real-time feedback
                                 if sse::is_thinking_block_start(line) {
-                                    // Clear buffer for new thinking block
-                                    if let Ok(mut buf) = streaming_thinking.lock() {
-                                        buf.clear();
+                                    // Clear buffer for new thinking block (keyed by user_id)
+                                    if let Ok(mut map) = streaming_thinking.lock() {
+                                        let key = user_id_clone.as_deref().unwrap_or("unknown");
+                                        map.insert(key.to_string(), String::new());
                                     }
                                     let _ = event_tx_tui
                                         .send(TrackedEvent::new(
@@ -1131,10 +1132,13 @@ async fn handle_streaming_response(ctx: ResponseContext) -> Result<Response<Body
                                         ))
                                         .await;
                                 }
-                                // Stream thinking content in real-time
+                                // Stream thinking content in real-time (keyed by user_id)
                                 if let Some(thinking_text) = sse::extract_thinking_delta(line) {
-                                    if let Ok(mut buf) = streaming_thinking.lock() {
-                                        buf.push_str(&thinking_text);
+                                    if let Ok(mut map) = streaming_thinking.lock() {
+                                        let key = user_id_clone.as_deref().unwrap_or("unknown");
+                                        map.entry(key.to_string())
+                                            .or_default()
+                                            .push_str(&thinking_text);
                                     }
                                 }
                                 line_buffer = line_buffer[newline_pos + 1..].to_string();

@@ -485,6 +485,19 @@ fn handle_global_keys(app: &mut App, key_event: &KeyEvent) -> bool {
             }
             true
         }
+        // Session switching: [ = previous, ] = next
+        KeyCode::Char('[') => {
+            if app.handle_key_press(key) {
+                app.prev_session();
+            }
+            true
+        }
+        KeyCode::Char(']') => {
+            if app.handle_key_press(key) {
+                app.next_session();
+            }
+            true
+        }
         _ => false,
     }
 }

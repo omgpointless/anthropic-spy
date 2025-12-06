@@ -106,14 +106,45 @@ impl EventsPanel {
         (start, end)
     }
 
-    /// Render the events panel (internal implementation)
+    /// Render the events panel with owned events slice (backward compatibility)
     ///
-    /// Takes event slice and theme directly - doesn't need full App access.
+    /// This method is kept for backward compatibility with code that passes
+    /// `&[TrackedEvent]` directly. New code should use `render_with_filtered_events`
+    /// which accepts references for efficient session filtering.
+    #[allow(dead_code)]
     pub fn render_with_events(
         &self,
         f: &mut Frame,
         area: Rect,
         events: &[TrackedEvent],
+        theme: &Theme,
+        focused: bool,
+    ) {
+        // Convert to references for unified rendering
+        let refs: Vec<&TrackedEvent> = events.iter().collect();
+        self.render_events_inner(f, area, &refs, theme, focused);
+    }
+
+    /// Render with pre-filtered event references (for multi-session support)
+    ///
+    /// Takes a slice of references - useful when events have been filtered.
+    pub fn render_with_filtered_events(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        events: &[&TrackedEvent],
+        theme: &Theme,
+        focused: bool,
+    ) {
+        self.render_events_inner(f, area, events, theme, focused);
+    }
+
+    /// Internal rendering implementation (works with references)
+    fn render_events_inner(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        events: &[&TrackedEvent],
         theme: &Theme,
         focused: bool,
     ) {
@@ -126,7 +157,7 @@ impl EventsPanel {
         let items: Vec<ListItem> = events[start..end]
             .iter()
             .enumerate()
-            .map(|(idx, tracked)| {
+            .map(|(idx, &tracked)| {
                 let actual_idx = start + idx;
                 let is_selected = self.selected == Some(actual_idx);
 
@@ -464,9 +495,11 @@ fn event_color_style(event: &ProxyEvent, theme: &Theme) -> Style {
     }
 }
 
-/// Convenience render function for use in views
+/// Convenience render function (backward compatibility)
 ///
-/// This is the main entry point used by views::events::render
+/// Kept for backward compatibility. New code should use `render_filtered`
+/// which accepts references for efficient session filtering.
+#[allow(dead_code)]
 pub fn render(
     f: &mut Frame,
     area: Rect,
@@ -476,4 +509,16 @@ pub fn render(
     focused: bool,
 ) {
     events_panel.render_with_events(f, area, events, theme, focused);
+}
+
+/// Render with filtered event references (for multi-session support)
+pub fn render_filtered(
+    f: &mut Frame,
+    area: Rect,
+    events_panel: &EventsPanel,
+    events: &[&TrackedEvent],
+    theme: &Theme,
+    focused: bool,
+) {
+    events_panel.render_with_filtered_events(f, area, events, theme, focused);
 }

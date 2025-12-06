@@ -53,9 +53,9 @@ pub async fn run_demo(
             ..
         } = &event
         {
-            // First emit ThinkingStarted and clear the buffer
-            if let Ok(mut buf) = streaming_thinking.lock() {
-                buf.clear();
+            // First emit ThinkingStarted and clear the buffer for demo user
+            if let Ok(mut map) = streaming_thinking.lock() {
+                map.insert(DEMO_USER_ID.to_string(), String::new());
             }
             let _ = tx
                 .send(wrap_demo_event(ProxyEvent::ThinkingStarted {
@@ -107,7 +107,8 @@ async fn stream_thinking_content(streaming_thinking: &StreamingThinking, content
     let delay_per_word = Duration::from_millis(50); // ~20 words/sec, good for recordings
 
     for (i, word) in words.iter().enumerate() {
-        if let Ok(mut buf) = streaming_thinking.lock() {
+        if let Ok(mut map) = streaming_thinking.lock() {
+            let buf = map.entry(DEMO_USER_ID.to_string()).or_default();
             if i > 0 {
                 buf.push(' ');
             }
