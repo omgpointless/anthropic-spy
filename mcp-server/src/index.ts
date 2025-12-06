@@ -4,6 +4,11 @@
  *
  * Exposes Aspy's HTTP API as MCP tools for Claude Code integration.
  * This is a thin wrapper - all data comes from the running Aspy proxy.
+ *
+ * Tool naming philosophy:
+ * - SESSION tools: aspy_stats, aspy_events, aspy_window, aspy_sessions
+ * - MEMORY tools: aspy_recall (primary), aspy_recall_* (specialized)
+ * - LIFETIME tools: aspy_lifetime, aspy_embeddings
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -23,33 +28,27 @@ const API_BASE = process.env.ASPY_API_URL ?? "http://127.0.0.1:8080";
  *
  * Priority order:
  * 1. ASPY_CLIENT_ID - Explicit client ID (matches proxy's URL path routing)
- *    Use this when connecting via http://localhost:8080/foundry/ etc.
  * 2. ANTHROPIC_API_KEY/AUTH_TOKEN hash - Fallback for bare URL users
- *    Use this when connecting via http://localhost:8080/ without client path
- *
- * Returns null if no identity can be determined.
  */
 let cachedUserId: string | null = null;
 
 function getUserId(): string | null {
   if (cachedUserId !== null) return cachedUserId;
 
-  // Priority 1: Explicit client ID (supports multi-client same-API-key setups)
-  // This matches the proxy's routing: /foundry/v1/messages → user_id = "foundry"
+  // Priority 1: Explicit client ID
   if (process.env.ASPY_CLIENT_ID) {
     cachedUserId = process.env.ASPY_CLIENT_ID;
     return cachedUserId;
   }
 
-  // Priority 2: API key hash (fallback for users not using client routing)
+  // Priority 2: API key hash
   const authToken =
     process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN;
 
   if (!authToken) {
-    return null; // Can't determine identity
+    return null;
   }
 
-  // SHA-256 hash, first 16 hex chars (matches Rust: format!("{:x}", hash)[..16])
   cachedUserId = createHash("sha256")
     .update(authToken, "utf8")
     .digest("hex")
@@ -72,38 +71,6 @@ type ApiResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
 async function fetchApi<T>(endpoint: string): Promise<ApiResult<T>> {
   try {
     const response = await fetch(`${API_BASE}${endpoint}`);
-
-    if (!response.ok) {
-      return {
-        ok: false,
-        error: {
-          error: `HTTP ${response.status}: ${response.statusText}`,
-          status: response.status,
-        },
-      };
-    }
-
-    const data = (await response.json()) as T;
-    return { ok: true, data };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return {
-      ok: false,
-      error: {
-        error: `Failed to connect to Aspy: ${message}`,
-        status: 0,
-      },
-    };
-  }
-}
-
-async function postApi<T>(endpoint: string, body: unknown): Promise<ApiResult<T>> {
-  try {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
 
     if (!response.ok) {
       return {
@@ -194,22 +161,44 @@ interface ContextResponse {
   };
 }
 
-interface SearchResponse {
-  [key: string]: unknown;
-  query: string;
-  sessions_searched: number;
-  total_matches: number;
-  results: Array<{
-    session: string;
-    timestamp: string;
-    role: string;
-    text: string;
+interface SessionsResponse {
+  active_count: number;
+  sessions: Array<{
+    key: string;
+    user_id: string;
+    claude_session_id: string | null;
+    source: string;
+    started: string;
+    status: string;
+    event_count: number;
+    stats: {
+      requests: number;
+      tool_calls: number;
+      input_tokens: number;
+      output_tokens: number;
+      cost_usd: number;
+    };
   }>;
 }
 
-// ============================================================================
-// Lifestats Type Definitions (matching Rust API responses)
-// ============================================================================
+// Recall/Memory types
+type MatchType = "thinking" | "user_prompt" | "assistant_response";
+
+interface ContextMatch {
+  match_type: MatchType;
+  session_id: string | null;
+  timestamp: string;
+  content: string;
+  rank: number;
+}
+
+interface HybridContextResponse {
+  [key: string]: unknown;
+  topic: string;
+  mode: string;
+  search_type: string; // "fts_only" or "hybrid"
+  results: ContextMatch[];
+}
 
 interface ThinkingMatch {
   session_id: string | null;
@@ -227,16 +216,6 @@ interface PromptMatch {
 }
 
 interface ResponseMatch {
-  session_id: string | null;
-  timestamp: string;
-  content: string;
-  rank: number;
-}
-
-type MatchType = "thinking" | "user_prompt" | "assistant_response";
-
-interface ContextMatch {
-  match_type: MatchType;
   session_id: string | null;
   timestamp: string;
   content: string;
@@ -264,13 +243,7 @@ interface ResponseSearchResponse {
   results: ResponseMatch[];
 }
 
-interface ContextSearchResponse {
-  [key: string]: unknown;
-  topic: string;
-  mode: string;
-  results: ContextMatch[];
-}
-
+// Lifetime types
 interface ModelStats {
   [key: string]: unknown;
   model: string;
@@ -303,16 +276,53 @@ interface LifetimeStats {
   by_tool: ToolStats[];
 }
 
+interface EmbeddingStatusResponse {
+  [key: string]: unknown;
+  enabled: boolean;
+  provider: string;
+  model: string;
+  dimensions: number;
+  documents_embedded: number;
+  documents_total: number;
+  progress_pct: number;
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+function formatMatchType(matchType: MatchType): string {
+  switch (matchType) {
+    case "thinking":
+      return "💭 Thinking";
+    case "user_prompt":
+      return "👤 User";
+    case "assistant_response":
+      return "🤖 Assistant";
+    default:
+      return matchType;
+  }
+}
+
+function truncateContent(content: string, maxLen: number = 200): string {
+  if (content.length <= maxLen) return content;
+  return content.slice(0, maxLen) + "...";
+}
+
 // ============================================================================
 // MCP Server
 // ============================================================================
 
 const server = new McpServer({
   name: "aspy",
-  version: "0.1.0",
+  version: "0.2.0",
 });
 
-// Tool: aspy_stats
+// ============================================================================
+// SESSION TOOLS - Current session data
+// ============================================================================
+
+// Tool: aspy_stats - Session statistics
 server.registerTool(
   "aspy_stats",
   {
@@ -352,7 +362,6 @@ server.registerTool(
     },
   },
   async () => {
-    // Auto-scope to current user's session
     const userId = getUserId();
     const endpoint = userId ? `/api/stats?user=${userId}` : "/api/stats";
     const result = await fetchApi<StatsResponse>(endpoint);
@@ -396,7 +405,7 @@ server.registerTool(
   }
 );
 
-// Tool: aspy_events
+// Tool: aspy_events - Session events
 server.registerTool(
   "aspy_events",
   {
@@ -439,7 +448,6 @@ server.registerTool(
     if (type) {
       params.set("type", type);
     }
-    // Auto-scope to current user's session
     const userId = getUserId();
     if (userId) {
       params.set("user", userId);
@@ -454,22 +462,20 @@ server.registerTool(
       };
     }
 
-    const output = result.data;
-
     return {
-      content: [{ type: "text" as const, text: JSON.stringify(output, null, 2) }],
-      structuredContent: output,
+      content: [{ type: "text" as const, text: JSON.stringify(result.data, null, 2) }],
+      structuredContent: result.data,
     };
   }
 );
 
-// Tool: aspy_context
+// Tool: aspy_window - Context window gauge (renamed from aspy_context)
 server.registerTool(
-  "aspy_context",
+  "aspy_window",
   {
-    title: "Context Window Status",
+    title: "Context Window",
     description:
-      "Get current context window usage, warning level, and compact count from Aspy",
+      "Check context window usage percentage, warning level, and compact count. Use this to monitor how full your context is.",
     inputSchema: {},
     outputSchema: {
       current_tokens: z.number(),
@@ -484,7 +490,6 @@ server.registerTool(
     },
   },
   async () => {
-    // Auto-scope to current user's session
     const userId = getUserId();
     const endpoint = userId ? `/api/context?user=${userId}` : "/api/context";
     const result = await fetchApi<ContextResponse>(endpoint);
@@ -498,7 +503,6 @@ server.registerTool(
 
     const output = result.data;
 
-    // Add human-readable status
     const statusEmoji = {
       normal: "🟢",
       warning: "🟡",
@@ -506,7 +510,7 @@ server.registerTool(
       critical: "🔴",
     }[output.warning_level];
 
-    const summary = `${statusEmoji} Context: ${Math.floor(output.usage_pct)}% (${Math.floor(output.current_tokens / 1000)}K / ${Math.floor(output.limit_tokens / 1000)}K)`;
+    const summary = `${statusEmoji} Context Window: ${Math.floor(output.usage_pct)}% (${Math.floor(output.current_tokens / 1000)}K / ${Math.floor(output.limit_tokens / 1000)}K)`;
 
     return {
       content: [
@@ -518,27 +522,7 @@ server.registerTool(
   }
 );
 
-// Tool: aspy_sessions
-interface SessionsResponse {
-  active_count: number;
-  sessions: Array<{
-    key: string;
-    user_id: string;
-    claude_session_id: string | null;
-    source: string;
-    started: string;
-    status: string;
-    event_count: number;
-    stats: {
-      requests: number;
-      tool_calls: number;
-      input_tokens: number;
-      output_tokens: number;
-      cost_usd: number;
-    };
-  }>;
-}
-
+// Tool: aspy_sessions - List all sessions
 server.registerTool(
   "aspy_sessions",
   {
@@ -582,7 +566,6 @@ server.registerTool(
       stats: s.stats,
     }));
 
-    // Find my session for summary
     const mySession = sessions.find((s) => s.is_me);
     const summaryParts = [`📊 ${result.data.active_count} active session(s)`];
 
@@ -610,157 +593,41 @@ server.registerTool(
   }
 );
 
-// Tool: aspy_search
+// ============================================================================
+// MEMORY TOOLS - Cross-session recall (search past sessions)
+// ============================================================================
+
+// Tool: aspy_recall - PRIMARY memory search (semantic + keyword hybrid)
 server.registerTool(
-  "aspy_search",
+  "aspy_recall",
   {
-    title: "Search Session Logs",
+    title: "Recall Memory",
     description:
-      "Search session logs for past conversations. Use to recover context lost to compaction or find previous decisions/discussions. Searches through all logged sessions for messages containing the keyword.",
+      "Search your memory across all past sessions. Uses semantic search (if embeddings enabled) combined with keyword matching. This is THE tool for recovering lost context - handles fuzzy queries like 'that thing about golf and nature' as well as exact matches.",
     inputSchema: {
-      keyword: z
-        .string()
-        .min(2)
-        .describe("Search term (case-insensitive, min 2 characters)"),
-      role: z
-        .enum(["user", "assistant"])
-        .optional()
-        .describe("Filter by message author"),
-      session: z
-        .string()
-        .optional()
-        .describe("Filter to specific session (partial filename match)"),
+      query: z.string().min(2).describe("What to search for - can be fuzzy or exact"),
       limit: z
         .number()
         .min(1)
-        .max(100)
+        .max(50)
         .default(10)
-        .describe("Maximum results to return (default: 10, max: 100)"),
-      time_range: z
-        .enum(["today", "before_today", "last_3_days", "last_7_days", "last_30_days"])
-        .optional()
-        .describe("Filter by time range (default: all time)"),
+        .describe("Maximum results (default: 10)"),
     },
     outputSchema: {
       query: z.string(),
-      sessions_searched: z.number(),
-      total_matches: z.number(),
+      search_type: z.string(),
       results: z.array(
         z.object({
-          session: z.string(),
-          timestamp: z.string(),
-          role: z.string(),
-          text: z.string(),
-        })
-      ),
-    },
-  },
-  async ({ keyword, role, session, limit = 10, time_range }) => {
-    const result = await postApi<SearchResponse>("/api/search", {
-      keyword,
-      role,
-      session,
-      limit,
-      time_range,
-    });
-
-    if (!result.ok) {
-      return {
-        content: [{ type: "text" as const, text: `Error: ${result.error.error}` }],
-        isError: true,
-      };
-    }
-
-    const data = result.data;
-
-    // Build human-readable summary
-    const summaryParts = [
-      `🔍 Found ${data.total_matches} match(es) for "${data.query}" across ${data.sessions_searched} session(s):`,
-    ];
-
-    if (data.results.length === 0) {
-      summaryParts.push("\nNo matches found. Try a different keyword or check that logs exist.");
-    } else {
-      summaryParts.push("");
-      for (const r of data.results) {
-        // Extract just the date part from session filename
-        const sessionDate = r.session.replace("aspy-", "").replace(".jsonl", "").slice(0, 8);
-        summaryParts.push(`**${sessionDate}** [${r.role}]:`);
-        summaryParts.push(`${r.text}\n`);
-      }
-    }
-
-    return {
-      content: [
-        { type: "text" as const, text: summaryParts.join("\n") },
-        { type: "text" as const, text: JSON.stringify(data, null, 2) },
-      ],
-      structuredContent: data,
-    };
-  }
-);
-
-// ============================================================================
-// Lifestats Tools (FTS5 Search - Cross-Session Context Recovery)
-// ============================================================================
-
-// Helper: Format match type for display
-function formatMatchType(matchType: MatchType): string {
-  switch (matchType) {
-    case "thinking":
-      return "💭 Thinking";
-    case "user_prompt":
-      return "👤 User";
-    case "assistant_response":
-      return "🤖 Assistant";
-    default:
-      return matchType;
-  }
-}
-
-// Helper: Truncate content for summary display
-function truncateContent(content: string, maxLen: number = 200): string {
-  if (content.length <= maxLen) return content;
-  return content.slice(0, maxLen) + "...";
-}
-
-// Tool: aspy_lifestats_search_thinking
-server.registerTool(
-  "aspy_lifestats_search_thinking",
-  {
-    title: "Search Thinking Blocks (FTS5)",
-    description:
-      "Search Claude's thinking blocks across all your sessions using FTS5 full-text search. Returns results ranked by BM25 relevance. Use this to find past reasoning, analysis, and internal deliberation.",
-    inputSchema: {
-      q: z.string().min(2).describe("Search query (min 2 characters)"),
-      limit: z
-        .number()
-        .min(1)
-        .max(100)
-        .default(10)
-        .describe("Maximum results (default: 10, max: 100)"),
-      mode: z
-        .enum(["phrase", "natural", "raw"])
-        .default("phrase")
-        .describe(
-          "Search mode: phrase (exact match), natural (AND/OR/NOT operators), raw (full FTS5 syntax)"
-        ),
-    },
-    outputSchema: {
-      query: z.string(),
-      mode: z.string(),
-      results: z.array(
-        z.object({
+          match_type: z.string(),
           session_id: z.string().nullable(),
           timestamp: z.string(),
           content: z.string(),
-          tokens: z.number().nullable(),
           rank: z.number(),
         })
       ),
     },
   },
-  async ({ q, limit = 10, mode = "phrase" }) => {
+  async ({ query, limit = 10 }) => {
     const userId = getUserId();
     if (!userId) {
       return {
@@ -775,9 +642,103 @@ server.registerTool(
     }
 
     const params = new URLSearchParams();
-    params.set("q", q);
+    params.set("topic", query);
     params.set("limit", String(limit));
-    params.set("mode", mode);
+    params.set("mode", "phrase");
+
+    // Always use hybrid endpoint - it auto-falls back to FTS if no embeddings
+    const result = await fetchApi<HybridContextResponse>(
+      `/api/lifestats/context/hybrid/user/${userId}?${params}`
+    );
+
+    if (!result.ok) {
+      return {
+        content: [{ type: "text" as const, text: `Error: ${result.error.error}` }],
+        isError: true,
+      };
+    }
+
+    const data = result.data;
+
+    // Build human-readable summary
+    const searchIcon = data.search_type === "hybrid" ? "🧠" : "📚";
+    const searchLabel = data.search_type === "hybrid" ? "Semantic + Keyword" : "Keyword only";
+    const summaryParts = [
+      `${searchIcon} **Recall** (${searchLabel}): Found ${data.results.length} match(es) for "${data.topic}"`,
+    ];
+
+    if (data.results.length === 0) {
+      summaryParts.push("\nNo matches found. Try different keywords or broader terms.");
+    } else {
+      summaryParts.push("");
+      for (const r of data.results) {
+        const session = r.session_id?.slice(0, 8) ?? "unknown";
+        const date = r.timestamp.split("T")[0];
+        const typeLabel = formatMatchType(r.match_type);
+        summaryParts.push(
+          `${typeLabel} **[${date}]** (session: ${session})`
+        );
+        summaryParts.push(`${truncateContent(r.content)}\n`);
+      }
+    }
+
+    return {
+      content: [
+        { type: "text" as const, text: summaryParts.join("\n") },
+        { type: "text" as const, text: JSON.stringify(data, null, 2) },
+      ],
+      structuredContent: data,
+    };
+  }
+);
+
+// Tool: aspy_recall_thinking - Search Claude's reasoning only
+server.registerTool(
+  "aspy_recall_thinking",
+  {
+    title: "Recall Thinking",
+    description:
+      "Search Claude's past thinking blocks (internal reasoning). Use when you need to find WHY something was decided or HOW a problem was analyzed.",
+    inputSchema: {
+      query: z.string().min(2).describe("Search query"),
+      limit: z
+        .number()
+        .min(1)
+        .max(100)
+        .default(10)
+        .describe("Maximum results (default: 10)"),
+    },
+    outputSchema: {
+      query: z.string(),
+      results: z.array(
+        z.object({
+          session_id: z.string().nullable(),
+          timestamp: z.string(),
+          content: z.string(),
+          tokens: z.number().nullable(),
+          rank: z.number(),
+        })
+      ),
+    },
+  },
+  async ({ query, limit = 10 }) => {
+    const userId = getUserId();
+    if (!userId) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: "Error: Cannot determine user identity. Ensure ANTHROPIC_API_KEY is set.",
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const params = new URLSearchParams();
+    params.set("q", query);
+    params.set("limit", String(limit));
+    params.set("mode", "phrase");
 
     const result = await fetchApi<ThinkingSearchResponse>(
       `/api/lifestats/search/user/${userId}/thinking?${params}`
@@ -792,19 +753,18 @@ server.registerTool(
 
     const data = result.data;
 
-    // Build human-readable summary
     const summaryParts = [
-      `💭 Found ${data.results.length} thinking block(s) for "${data.query}" (mode: ${data.mode}):`,
+      `💭 Found ${data.results.length} thinking block(s) for "${data.query}":`,
     ];
 
     if (data.results.length === 0) {
-      summaryParts.push("\nNo matches found. Try different keywords or search mode.");
+      summaryParts.push("\nNo matches found.");
     } else {
       summaryParts.push("");
       for (const r of data.results) {
         const session = r.session_id?.slice(0, 8) ?? "unknown";
         const date = r.timestamp.split("T")[0];
-        summaryParts.push(`**[${date}]** (session: ${session}, rank: ${r.rank.toFixed(2)})`);
+        summaryParts.push(`**[${date}]** (session: ${session})`);
         summaryParts.push(`${truncateContent(r.content)}\n`);
       }
     }
@@ -819,31 +779,24 @@ server.registerTool(
   }
 );
 
-// Tool: aspy_lifestats_search_prompts
+// Tool: aspy_recall_prompts - Search user questions only
 server.registerTool(
-  "aspy_lifestats_search_prompts",
+  "aspy_recall_prompts",
   {
-    title: "Search User Prompts (FTS5)",
+    title: "Recall Prompts",
     description:
-      "Search your past prompts/messages across all sessions using FTS5 full-text search. Returns results ranked by BM25 relevance. Use this to find what you asked previously.",
+      "Search your past prompts/questions. Use when you need to find what YOU asked previously.",
     inputSchema: {
-      q: z.string().min(2).describe("Search query (min 2 characters)"),
+      query: z.string().min(2).describe("Search query"),
       limit: z
         .number()
         .min(1)
         .max(100)
         .default(10)
-        .describe("Maximum results (default: 10, max: 100)"),
-      mode: z
-        .enum(["phrase", "natural", "raw"])
-        .default("phrase")
-        .describe(
-          "Search mode: phrase (exact match), natural (AND/OR/NOT operators), raw (full FTS5 syntax)"
-        ),
+        .describe("Maximum results (default: 10)"),
     },
     outputSchema: {
       query: z.string(),
-      mode: z.string(),
       results: z.array(
         z.object({
           session_id: z.string().nullable(),
@@ -854,7 +807,7 @@ server.registerTool(
       ),
     },
   },
-  async ({ q, limit = 10, mode = "phrase" }) => {
+  async ({ query, limit = 10 }) => {
     const userId = getUserId();
     if (!userId) {
       return {
@@ -869,9 +822,9 @@ server.registerTool(
     }
 
     const params = new URLSearchParams();
-    params.set("q", q);
+    params.set("q", query);
     params.set("limit", String(limit));
-    params.set("mode", mode);
+    params.set("mode", "phrase");
 
     const result = await fetchApi<PromptSearchResponse>(
       `/api/lifestats/search/user/${userId}/prompts?${params}`
@@ -886,19 +839,18 @@ server.registerTool(
 
     const data = result.data;
 
-    // Build human-readable summary
     const summaryParts = [
-      `👤 Found ${data.results.length} user prompt(s) for "${data.query}" (mode: ${data.mode}):`,
+      `👤 Found ${data.results.length} prompt(s) for "${data.query}":`,
     ];
 
     if (data.results.length === 0) {
-      summaryParts.push("\nNo matches found. Try different keywords or search mode.");
+      summaryParts.push("\nNo matches found.");
     } else {
       summaryParts.push("");
       for (const r of data.results) {
         const session = r.session_id?.slice(0, 8) ?? "unknown";
         const date = r.timestamp.split("T")[0];
-        summaryParts.push(`**[${date}]** (session: ${session}, rank: ${r.rank.toFixed(2)})`);
+        summaryParts.push(`**[${date}]** (session: ${session})`);
         summaryParts.push(`${truncateContent(r.content)}\n`);
       }
     }
@@ -913,31 +865,24 @@ server.registerTool(
   }
 );
 
-// Tool: aspy_lifestats_search_responses
+// Tool: aspy_recall_responses - Search Claude's answers only
 server.registerTool(
-  "aspy_lifestats_search_responses",
+  "aspy_recall_responses",
   {
-    title: "Search Assistant Responses (FTS5)",
+    title: "Recall Responses",
     description:
-      "Search Claude's past responses across all your sessions using FTS5 full-text search. Returns results ranked by BM25 relevance. Use this to find previous explanations, code, or answers.",
+      "Search Claude's past responses. Use when you need to find previous explanations, code, or answers.",
     inputSchema: {
-      q: z.string().min(2).describe("Search query (min 2 characters)"),
+      query: z.string().min(2).describe("Search query"),
       limit: z
         .number()
         .min(1)
         .max(100)
         .default(10)
-        .describe("Maximum results (default: 10, max: 100)"),
-      mode: z
-        .enum(["phrase", "natural", "raw"])
-        .default("phrase")
-        .describe(
-          "Search mode: phrase (exact match), natural (AND/OR/NOT operators), raw (full FTS5 syntax)"
-        ),
+        .describe("Maximum results (default: 10)"),
     },
     outputSchema: {
       query: z.string(),
-      mode: z.string(),
       results: z.array(
         z.object({
           session_id: z.string().nullable(),
@@ -948,7 +893,7 @@ server.registerTool(
       ),
     },
   },
-  async ({ q, limit = 10, mode = "phrase" }) => {
+  async ({ query, limit = 10 }) => {
     const userId = getUserId();
     if (!userId) {
       return {
@@ -963,9 +908,9 @@ server.registerTool(
     }
 
     const params = new URLSearchParams();
-    params.set("q", q);
+    params.set("q", query);
     params.set("limit", String(limit));
-    params.set("mode", mode);
+    params.set("mode", "phrase");
 
     const result = await fetchApi<ResponseSearchResponse>(
       `/api/lifestats/search/user/${userId}/responses?${params}`
@@ -980,19 +925,18 @@ server.registerTool(
 
     const data = result.data;
 
-    // Build human-readable summary
     const summaryParts = [
-      `🤖 Found ${data.results.length} assistant response(s) for "${data.query}" (mode: ${data.mode}):`,
+      `🤖 Found ${data.results.length} response(s) for "${data.query}":`,
     ];
 
     if (data.results.length === 0) {
-      summaryParts.push("\nNo matches found. Try different keywords or search mode.");
+      summaryParts.push("\nNo matches found.");
     } else {
       summaryParts.push("");
       for (const r of data.results) {
         const session = r.session_id?.slice(0, 8) ?? "unknown";
         const date = r.timestamp.split("T")[0];
-        summaryParts.push(`**[${date}]** (session: ${session}, rank: ${r.rank.toFixed(2)})`);
+        summaryParts.push(`**[${date}]** (session: ${session})`);
         summaryParts.push(`${truncateContent(r.content)}\n`);
       }
     }
@@ -1007,302 +951,17 @@ server.registerTool(
   }
 );
 
-// Tool: aspy_lifestats_context (MOST IMPORTANT - Combined Context Recovery)
+// ============================================================================
+// LIFETIME TOOLS - All-time statistics and configuration
+// ============================================================================
+
+// Tool: aspy_lifetime - All-time usage statistics
 server.registerTool(
-  "aspy_lifestats_context",
-  {
-    title: "Context Recovery (FTS5)",
-    description:
-      "RECOMMENDED: Combined context recovery searching across thinking blocks, user prompts, AND assistant responses simultaneously. Returns unified results ranked by BM25 relevance. Best tool for recovering lost context after session compaction.",
-    inputSchema: {
-      topic: z.string().min(2).describe("Topic to search for (min 2 characters)"),
-      limit: z
-        .number()
-        .min(1)
-        .max(100)
-        .default(10)
-        .describe("Maximum total results (default: 10, max: 100)"),
-      mode: z
-        .enum(["phrase", "natural", "raw"])
-        .default("phrase")
-        .describe(
-          "Search mode: phrase (exact match), natural (AND/OR/NOT operators), raw (full FTS5 syntax)"
-        ),
-    },
-    outputSchema: {
-      topic: z.string(),
-      mode: z.string(),
-      results: z.array(
-        z.object({
-          match_type: z.string(),
-          session_id: z.string().nullable(),
-          timestamp: z.string(),
-          content: z.string(),
-          rank: z.number(),
-        })
-      ),
-    },
-  },
-  async ({ topic, limit = 10, mode = "phrase" }) => {
-    const userId = getUserId();
-    if (!userId) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: "Error: Cannot determine user identity. Ensure ANTHROPIC_API_KEY is set.",
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    const params = new URLSearchParams();
-    params.set("topic", topic);
-    params.set("limit", String(limit));
-    params.set("mode", mode);
-
-    const result = await fetchApi<ContextSearchResponse>(
-      `/api/lifestats/context/user/${userId}?${params}`
-    );
-
-    if (!result.ok) {
-      return {
-        content: [{ type: "text" as const, text: `Error: ${result.error.error}` }],
-        isError: true,
-      };
-    }
-
-    const data = result.data;
-
-    // Build human-readable summary with source type indicators
-    const summaryParts = [
-      `🔍 Context Recovery: Found ${data.results.length} match(es) for "${data.topic}" (mode: ${data.mode}):`,
-    ];
-
-    if (data.results.length === 0) {
-      summaryParts.push("\nNo matches found. Try:");
-      summaryParts.push("  - Different keywords");
-      summaryParts.push('  - mode: "natural" with AND/OR operators');
-      summaryParts.push("  - Broader search terms");
-    } else {
-      summaryParts.push("");
-      for (const r of data.results) {
-        const session = r.session_id?.slice(0, 8) ?? "unknown";
-        const date = r.timestamp.split("T")[0];
-        const typeLabel = formatMatchType(r.match_type);
-        summaryParts.push(
-          `${typeLabel} **[${date}]** (session: ${session}, rank: ${r.rank.toFixed(2)})`
-        );
-        summaryParts.push(`${truncateContent(r.content)}\n`);
-      }
-    }
-
-    return {
-      content: [
-        { type: "text" as const, text: summaryParts.join("\n") },
-        { type: "text" as const, text: JSON.stringify(data, null, 2) },
-      ],
-      structuredContent: data,
-    };
-  }
-);
-
-// Tool: aspy_lifestats_embeddings_status (Check Embedding Indexer Status)
-interface EmbeddingStatusResponse {
-  [key: string]: unknown;
-  enabled: boolean;
-  provider: string;
-  model: string;
-  dimensions: number;
-  documents_embedded: number;
-  documents_total: number;
-  progress_pct: number;
-}
-
-server.registerTool(
-  "aspy_lifestats_embeddings_status",
-  {
-    title: "Embedding Status",
-    description:
-      "Check the status of the semantic embedding indexer. Shows whether embeddings are enabled, the provider/model configuration, and indexing progress.",
-    inputSchema: {},
-    outputSchema: {
-      enabled: z.boolean(),
-      provider: z.string(),
-      model: z.string(),
-      dimensions: z.number(),
-      documents_embedded: z.number(),
-      documents_total: z.number(),
-      progress_pct: z.number(),
-    },
-  },
-  async () => {
-    const result = await fetchApi<EmbeddingStatusResponse>("/api/lifestats/embeddings/status");
-
-    if (!result.ok) {
-      return {
-        content: [{ type: "text" as const, text: `Error: ${result.error.error}` }],
-        isError: true,
-      };
-    }
-
-    const data = result.data;
-
-    // Build human-readable summary
-    const statusIcon = data.enabled ? "🧠" : "📚";
-    const statusLabel = data.enabled ? "Enabled" : "Disabled (FTS-only)";
-    const summaryParts = [`${statusIcon} **Embeddings: ${statusLabel}**\n`];
-
-    if (data.enabled) {
-      summaryParts.push(`Provider: ${data.provider}`);
-      summaryParts.push(`Model: ${data.model}`);
-      summaryParts.push(`Dimensions: ${data.dimensions}`);
-      summaryParts.push(`\n**Indexing Progress:**`);
-      summaryParts.push(`Documents: ${data.documents_embedded} / ${data.documents_total} (${data.progress_pct.toFixed(1)}%)`);
-    } else {
-      summaryParts.push("Semantic search is disabled. Using FTS5 keyword search only.");
-      summaryParts.push("\n💡 To enable semantic search, add to ~/.config/aspy/config.toml:");
-      summaryParts.push("```toml");
-      summaryParts.push("[embeddings]");
-      summaryParts.push('provider = "remote"');
-      summaryParts.push('model = "text-embedding-3-small"');
-      summaryParts.push("```");
-      summaryParts.push("Then set OPENAI_API_KEY environment variable.");
-    }
-
-    return {
-      content: [
-        { type: "text" as const, text: summaryParts.join("\n") },
-        { type: "text" as const, text: JSON.stringify(data, null, 2) },
-      ],
-      structuredContent: data,
-    };
-  }
-);
-
-// Tool: aspy_lifestats_context_hybrid (SEMANTIC + FTS Hybrid Search)
-interface HybridContextResponse {
-  [key: string]: unknown;
-  topic: string;
-  mode: string;
-  search_type: string; // "fts_only" or "hybrid"
-  results: ContextMatch[];
-}
-
-server.registerTool(
-  "aspy_lifestats_context_hybrid",
-  {
-    title: "Hybrid Context Recovery (Semantic + FTS)",
-    description:
-      "BEST QUALITY: Hybrid context recovery combining semantic vector search with FTS5 keyword search using Reciprocal Rank Fusion (RRF). Provides superior results when embeddings are configured. Falls back to FTS-only if embeddings are unavailable.",
-    inputSchema: {
-      topic: z.string().min(2).describe("Topic to search for (min 2 characters)"),
-      limit: z
-        .number()
-        .min(1)
-        .max(50)
-        .default(10)
-        .describe("Maximum total results (default: 10, max: 50)"),
-      mode: z
-        .enum(["phrase", "natural", "raw"])
-        .default("phrase")
-        .describe(
-          "FTS search mode: phrase (exact match), natural (AND/OR/NOT operators), raw (full FTS5 syntax)"
-        ),
-    },
-    outputSchema: {
-      topic: z.string(),
-      mode: z.string(),
-      search_type: z.string(),
-      results: z.array(
-        z.object({
-          match_type: z.string(),
-          session_id: z.string().nullable(),
-          timestamp: z.string(),
-          content: z.string(),
-          rank: z.number(),
-        })
-      ),
-    },
-  },
-  async ({ topic, limit = 10, mode = "phrase" }) => {
-    const userId = getUserId();
-    if (!userId) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: "Error: Cannot determine user identity. Ensure ANTHROPIC_API_KEY is set.",
-          },
-        ],
-        isError: true,
-      };
-    }
-
-    const params = new URLSearchParams();
-    params.set("topic", topic);
-    params.set("limit", String(limit));
-    params.set("mode", mode);
-
-    const result = await fetchApi<HybridContextResponse>(
-      `/api/lifestats/context/hybrid/user/${userId}?${params}`
-    );
-
-    if (!result.ok) {
-      return {
-        content: [{ type: "text" as const, text: `Error: ${result.error.error}` }],
-        isError: true,
-      };
-    }
-
-    const data = result.data;
-
-    // Build human-readable summary with search type indicator
-    const searchIcon = data.search_type === "hybrid" ? "🧠+📚" : "📚";
-    const searchLabel = data.search_type === "hybrid" ? "Hybrid (Semantic + FTS)" : "FTS-only";
-    const summaryParts = [
-      `${searchIcon} **${searchLabel}** Context Recovery: Found ${data.results.length} match(es) for "${data.topic}":`,
-    ];
-
-    if (data.results.length === 0) {
-      summaryParts.push("\nNo matches found. Try:");
-      summaryParts.push("  - Different keywords");
-      summaryParts.push('  - mode: "natural" with AND/OR operators');
-      summaryParts.push("  - Broader search terms");
-      if (data.search_type === "fts_only") {
-        summaryParts.push("\n💡 Tip: Configure embeddings for semantic search capabilities");
-      }
-    } else {
-      summaryParts.push("");
-      for (const r of data.results) {
-        const session = r.session_id?.slice(0, 8) ?? "unknown";
-        const date = r.timestamp.split("T")[0];
-        const typeLabel = formatMatchType(r.match_type);
-        summaryParts.push(
-          `${typeLabel} **[${date}]** (session: ${session}, score: ${Math.abs(r.rank).toFixed(3)})`
-        );
-        summaryParts.push(`${truncateContent(r.content)}\n`);
-      }
-    }
-
-    return {
-      content: [
-        { type: "text" as const, text: summaryParts.join("\n") },
-        { type: "text" as const, text: JSON.stringify(data, null, 2) },
-      ],
-      structuredContent: data,
-    };
-  }
-);
-
-// Tool: aspy_lifestats_stats
-server.registerTool(
-  "aspy_lifestats_stats",
+  "aspy_lifetime",
   {
     title: "Lifetime Statistics",
     description:
-      "Get your lifetime usage statistics across all sessions: total tokens, costs, tool usage, model breakdown, and time range. Your personal Claude Code time machine summary.",
+      "Get your all-time usage statistics across all sessions: total tokens, costs, tool usage, model breakdown. Your personal Claude Code history summary.",
     inputSchema: {},
     outputSchema: {
       total_sessions: z.number(),
@@ -1360,24 +1019,20 @@ server.registerTool(
 
     const stats = result.data;
 
-    // Build human-readable summary
     const summaryParts = ["📊 **Your Claude Code Lifetime Stats**\n"];
 
-    // Overview
     summaryParts.push(`**Sessions:** ${stats.total_sessions}`);
     summaryParts.push(`**Total Tokens:** ${(stats.total_tokens / 1_000_000).toFixed(2)}M`);
     summaryParts.push(`**Total Cost:** $${stats.total_cost_usd.toFixed(2)}`);
     summaryParts.push(`**Tool Calls:** ${stats.total_tool_calls.toLocaleString()}`);
     summaryParts.push(`**Thinking Blocks:** ${stats.total_thinking_blocks.toLocaleString()}`);
 
-    // Time range
     if (stats.first_session && stats.last_session) {
       const first = stats.first_session.split("T")[0];
       const last = stats.last_session.split("T")[0];
       summaryParts.push(`\n**Time Range:** ${first} → ${last}`);
     }
 
-    // Top models
     if (stats.by_model.length > 0) {
       summaryParts.push("\n**By Model:**");
       for (const m of stats.by_model.slice(0, 5)) {
@@ -1387,16 +1042,11 @@ server.registerTool(
       }
     }
 
-    // Top tools
     if (stats.by_tool.length > 0) {
       summaryParts.push("\n**Top Tools:**");
       for (const t of stats.by_tool.slice(0, 5)) {
-        const failures = t.rejections + t.errors;
-        const failureDetail = failures > 0
-          ? ` [${t.rejections} rejected, ${t.errors} errors]`
-          : "";
         summaryParts.push(
-          `  - ${t.tool}: ${t.calls} calls (avg ${t.avg_duration_ms.toFixed(0)}ms, ${(t.success_rate * 100).toFixed(0)}% success)${failureDetail}`
+          `  - ${t.tool}: ${t.calls} calls (${(t.success_rate * 100).toFixed(0)}% success)`
         );
       }
     }
@@ -1411,6 +1061,63 @@ server.registerTool(
   }
 );
 
+// Tool: aspy_embeddings - Embedding indexer status
+server.registerTool(
+  "aspy_embeddings",
+  {
+    title: "Embeddings Status",
+    description:
+      "Check if semantic search is enabled and indexing progress. Embeddings power fuzzy memory recall - 'that thing about golf?' works when embeddings are enabled.",
+    inputSchema: {},
+    outputSchema: {
+      enabled: z.boolean(),
+      provider: z.string(),
+      model: z.string(),
+      dimensions: z.number(),
+      documents_embedded: z.number(),
+      documents_total: z.number(),
+      progress_pct: z.number(),
+    },
+  },
+  async () => {
+    const result = await fetchApi<EmbeddingStatusResponse>("/api/lifestats/embeddings/status");
+
+    if (!result.ok) {
+      return {
+        content: [{ type: "text" as const, text: `Error: ${result.error.error}` }],
+        isError: true,
+      };
+    }
+
+    const data = result.data;
+
+    const statusIcon = data.enabled ? "🧠" : "📚";
+    const statusLabel = data.enabled ? "Enabled" : "Disabled (keyword-only)";
+    const summaryParts = [`${statusIcon} **Semantic Search: ${statusLabel}**\n`];
+
+    if (data.enabled) {
+      summaryParts.push(`Provider: ${data.provider}`);
+      summaryParts.push(`Model: ${data.model}`);
+      summaryParts.push(`\n**Indexing:** ${data.documents_embedded} / ${data.documents_total} (${data.progress_pct.toFixed(1)}%)`);
+    } else {
+      summaryParts.push("Fuzzy queries like 'that golf thing?' won't work as well.");
+      summaryParts.push("\n💡 To enable, add to config.toml:");
+      summaryParts.push("```toml");
+      summaryParts.push("[embeddings]");
+      summaryParts.push('provider = "openai"');
+      summaryParts.push("```");
+    }
+
+    return {
+      content: [
+        { type: "text" as const, text: summaryParts.join("\n") },
+        { type: "text" as const, text: JSON.stringify(data, null, 2) },
+      ],
+      structuredContent: data,
+    };
+  }
+);
+
 // ============================================================================
 // Main
 // ============================================================================
@@ -1419,7 +1126,6 @@ async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  // Handle graceful shutdown
   process.on("SIGINT", async () => {
     await server.close();
     process.exit(0);

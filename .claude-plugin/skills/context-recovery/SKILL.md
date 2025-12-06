@@ -6,7 +6,7 @@ description: >
   "I lost context", "before the compact", "previous session", or asks about
   decisions/implementations/discussions that aren't in current context.
   Also use proactively when you notice references to prior work you lack context for.
-allowed-tools: Read, Grep, mcp__plugin_aspy_aspy__aspy_lifestats_context_hybrid, mcp__plugin_aspy_aspy__aspy_lifestats_context, mcp__plugin_aspy_aspy__aspy_search, mcp__plugin_aspy_aspy__aspy_lifestats_search_thinking, mcp__plugin_aspy_aspy__aspy_lifestats_search_prompts, mcp__plugin_aspy_aspy__aspy_lifestats_search_responses
+allowed-tools: Read, Grep, mcp__plugin_aspy_aspy__aspy_recall, mcp__plugin_aspy_aspy__aspy_recall_thinking, mcp__plugin_aspy_aspy__aspy_recall_prompts, mcp__plugin_aspy_aspy__aspy_recall_responses
 ---
 
 # Context Recovery
@@ -18,12 +18,13 @@ You've been activated to recover context that was lost to compaction or exists i
 1. **Identify the topic** - What specific context is needed?
    - If the user's request is vague, ask: "What topic should I search for?"
 
-2. **Use hybrid search first** (best results):
+2. **Use aspy_recall** (primary tool):
    ```
-   aspy_lifestats_context_hybrid(topic="<keywords>", limit=10)
+   aspy_recall(query="<keywords>", limit=10)
    ```
-   This combines semantic vector search with FTS5 keyword matching using RRF ranking.
+   This combines semantic search (if embeddings enabled) with keyword matching.
    Searches thinking blocks, user prompts, AND assistant responses simultaneously.
+   Handles both exact queries and fuzzy queries like "that golf thing?"
 
 3. **Synthesize, don't dump** - Summarize findings:
    - What was decided or implemented
@@ -34,21 +35,15 @@ You've been activated to recover context that was lost to compaction or exists i
 
 ## Search Strategy
 
-### Start with Hybrid (Best Quality)
-- `aspy_lifestats_context_hybrid` combines semantic + keyword search
+### Start with aspy_recall (Primary)
+- Combines semantic + keyword search automatically
 - Finds conceptually related content even with different wording
-- Use specific keywords from the user's question
 - Default limit of 10 results is usually sufficient
 
-### Fallback to FTS-Only
-- If hybrid returns insufficient results, try `aspy_lifestats_context`
-- Use `mode: "natural"` for OR-style searches: `"auth OR authentication OR login"`
-- Increase limit to 20-30 for comprehensive searches
-
 ### Targeted Searches (If Combined Is Noisy)
-- `aspy_lifestats_search_thinking` - Claude's reasoning and analysis
-- `aspy_lifestats_search_prompts` - What the user asked
-- `aspy_lifestats_search_responses` - Claude's answers and code
+- `aspy_recall_thinking` - Claude's reasoning and analysis (WHY decisions were made)
+- `aspy_recall_prompts` - What the user asked
+- `aspy_recall_responses` - Claude's answers and code
 
 ## What Makes Good Context Recovery
 
@@ -68,4 +63,5 @@ You've been activated to recover context that was lost to compaction or exists i
 | "that bug we fixed" | error keywords, "fix", file names |
 | "the refactor" | "refactor", component names |
 | "what we decided" | "decided", "approach", "pattern" |
-| "before compact" | recent topics, use `time_range: "today"` |
+| "before compact" | recent topics from today |
+| "something about golf?" | just search it - semantic will handle fuzzy |

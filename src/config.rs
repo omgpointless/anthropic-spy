@@ -1889,6 +1889,27 @@ mod tests {
             "Config with all transformers should round-trip.\nError: {:?}",
             parsed.err()
         );
+
+        // ─────────────────────────────────────────────────────────────────────
+        // STEP 5: Verify VALUES survived round-trip (catches mangled serialization)
+        // ─────────────────────────────────────────────────────────────────────
+        let file_config = parsed.unwrap();
+        let transformers = file_config
+            .transformers
+            .expect("transformers section should be present");
+
+        // Verify tag-editor
+        let tag_editor = transformers
+            .tag_editor
+            .expect("tag_editor should be present");
+        assert!(tag_editor.enabled, "tag_editor.enabled should be true");
+        assert_eq!(tag_editor.rules.len(), 1, "tag_editor should have 1 rule");
+
+        // Verify compact-enhancer
+        let compact = transformers
+            .compact_enhancer
+            .expect("compact_enhancer should be present");
+        assert!(compact.enabled, "compact_enhancer.enabled should be true");
     }
 
     /// Ensures the DEFAULT template includes commented examples for all transformers.
@@ -1914,5 +1935,149 @@ mod tests {
             "compact-enhancer not documented in default template!\n\
              Add a commented example so users can discover this feature."
         );
+    }
+
+    /// EXHAUSTIVE TEST: Ensures every augmentation field is serialized to TOML.
+    ///
+    /// When you add a new augmenter:
+    /// 1. Add the field to `Augmentation` struct
+    /// 2. Add the field to `FileAugmentation` struct
+    /// 3. Add merge logic in `Config::from_env()`
+    /// 4. THIS TEST WILL FAIL until you:
+    ///    a. Set the field below
+    ///    b. Add serialization in `to_toml()`
+    ///    c. Add the assertion for the TOML key
+    ///
+    /// Currently flat bools, but designed to catch growth to Option<SubConfig> pattern.
+    #[test]
+    fn test_all_augmenters_have_toml_serialization() {
+        // ─────────────────────────────────────────────────────────────────────
+        // STEP 1: Create config with ALL augmentation fields set to non-default.
+        // When you add a new augmenter, ADD IT HERE.
+        // ─────────────────────────────────────────────────────────────────────
+        let mut config = Config::default();
+
+        // Context warning (currently the only augmenter)
+        config.augmentation.context_warning = true;
+        config.augmentation.context_warning_thresholds = vec![50, 75, 90];
+
+        // ─────────────────────────────────────────────────────────────────────
+        // STEP 2: Generate TOML output
+        // ─────────────────────────────────────────────────────────────────────
+        let toml_str = config.to_toml();
+
+        // ─────────────────────────────────────────────────────────────────────
+        // STEP 3: Assert EVERY augmenter field appears in output.
+        // When you add a new augmenter, ADD AN ASSERTION HERE.
+        // ─────────────────────────────────────────────────────────────────────
+
+        assert!(
+            toml_str.contains("[augmentation]"),
+            "augmentation section missing from TOML output!"
+        );
+
+        assert!(
+            toml_str.contains("context_warning = true"),
+            "context_warning missing from TOML output!\n\
+             Did you forget to serialize it in to_toml()?"
+        );
+
+        assert!(
+            toml_str.contains("context_warning_thresholds"),
+            "context_warning_thresholds missing from TOML output!\n\
+             Did you forget to serialize it in to_toml()?"
+        );
+
+        // ─────────────────────────────────────────────────────────────────────
+        // STEP 4: Verify round-trip works
+        // ─────────────────────────────────────────────────────────────────────
+        let parsed: Result<FileConfig, _> = toml::from_str(&toml_str);
+        assert!(
+            parsed.is_ok(),
+            "Config with all augmenters should round-trip.\nError: {:?}",
+            parsed.err()
+        );
+
+        // Verify values survived round-trip
+        let file_config = parsed.unwrap();
+        let aug = file_config
+            .augmentation
+            .expect("augmentation should be present");
+        assert_eq!(aug.context_warning, Some(true));
+        assert_eq!(aug.context_warning_thresholds, Some(vec![50, 75, 90]));
+    }
+
+    /// EXHAUSTIVE TEST: Ensures every feature flag is serialized to TOML.
+    ///
+    /// When you add a new feature flag:
+    /// 1. Add the field to `Features` struct
+    /// 2. Add the field to `FileFeatures` struct
+    /// 3. Add merge logic in `Config::from_env()`
+    /// 4. THIS TEST WILL FAIL until you:
+    ///    a. Set the field below
+    ///    b. Add serialization in `to_toml()`
+    ///    c. Add the assertion for the TOML key
+    #[test]
+    fn test_all_features_have_toml_serialization() {
+        // ─────────────────────────────────────────────────────────────────────
+        // STEP 1: Create config with ALL feature fields set to non-default.
+        // When you add a new feature, ADD IT HERE.
+        // ─────────────────────────────────────────────────────────────────────
+        let mut config = Config::default();
+
+        // All current feature flags (defaults are all true, so flip to false)
+        config.features.storage = false;
+        config.features.thinking_panel = false;
+        config.features.stats = false;
+
+        // ─────────────────────────────────────────────────────────────────────
+        // STEP 2: Generate TOML output
+        // ─────────────────────────────────────────────────────────────────────
+        let toml_str = config.to_toml();
+
+        // ─────────────────────────────────────────────────────────────────────
+        // STEP 3: Assert EVERY feature field appears in output.
+        // When you add a new feature, ADD AN ASSERTION HERE.
+        // ─────────────────────────────────────────────────────────────────────
+
+        assert!(
+            toml_str.contains("[features]"),
+            "features section missing from TOML output!"
+        );
+
+        assert!(
+            toml_str.contains("storage = false"),
+            "storage missing from TOML output!\n\
+             Did you forget to serialize it in to_toml()?"
+        );
+
+        assert!(
+            toml_str.contains("thinking_panel = false"),
+            "thinking_panel missing from TOML output!\n\
+             Did you forget to serialize it in to_toml()?"
+        );
+
+        assert!(
+            toml_str.contains("stats = false"),
+            "stats missing from TOML output!\n\
+             Did you forget to serialize it in to_toml()?"
+        );
+
+        // ─────────────────────────────────────────────────────────────────────
+        // STEP 4: Verify round-trip works
+        // ─────────────────────────────────────────────────────────────────────
+        let parsed: Result<FileConfig, _> = toml::from_str(&toml_str);
+        assert!(
+            parsed.is_ok(),
+            "Config with all features should round-trip.\nError: {:?}",
+            parsed.err()
+        );
+
+        // Verify values survived round-trip
+        let file_config = parsed.unwrap();
+        let features = file_config.features.expect("features should be present");
+        assert_eq!(features.storage, Some(false));
+        assert_eq!(features.thinking_panel, Some(false));
+        assert_eq!(features.stats, Some(false));
     }
 }

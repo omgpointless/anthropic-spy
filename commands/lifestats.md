@@ -2,7 +2,7 @@
 description: "View lifetime usage statistics across all sessions"
 ---
 
-Use the `aspy_lifestats_stats` MCP tool to get lifetime statistics from Aspy.
+Use the `aspy_lifetime` MCP tool to get all-time statistics from Aspy.
 
 Display results showing:
 - Total sessions, tokens, and cost

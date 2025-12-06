@@ -2,7 +2,7 @@
 description: "Check context window usage %"
 ---
 
-Use the `aspy_context` MCP tool to check current context window usage.
+Use the `aspy_window` MCP tool to check current context window usage.
 
 Display results with:
 - Status indicator based on warning level:

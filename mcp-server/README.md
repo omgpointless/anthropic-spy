@@ -1,6 +1,6 @@
 # aspy-mcp
 
-MCP server for [Aspy](https://github.com/omgpointless/aspy) — exposes session stats, events, and context window status to Claude Code.
+MCP server for [Aspy](https://github.com/omgpointless/aspy) — exposes session stats, context window, and memory recall to Claude Code.
 
 ## Installation
 
@@ -21,104 +21,97 @@ claude mcp add aspy -e ASPY_URL=http://192.168.1.100:8080 -- npx -y aspy-mcp
 
 ## Available Tools
 
+### Session Tools (Current Session)
+
 | Tool | Description |
 |------|-------------|
-| `aspy_stats` | Session statistics — tokens, costs, cache efficiency |
-| `aspy_events` | Recent events — tool calls, API usage, thinking blocks |
-| `aspy_context` | Context window status — usage percentage, warning level |
-| `aspy_sessions` | All tracked sessions with `is_me` flag |
-| `aspy_search` | Search session logs for past conversations |
-| `aspy_lifestats_context` | **RECOMMENDED:** Combined FTS5 context recovery |
-| `aspy_lifestats_context_hybrid` | **BEST QUALITY:** Semantic + FTS hybrid search |
-| `aspy_lifestats_search_thinking` | Search past thinking blocks |
-| `aspy_lifestats_search_prompts` | Search past user prompts |
-| `aspy_lifestats_search_responses` | Search past assistant responses |
-| `aspy_lifestats_stats` | Lifetime usage statistics |
-| `aspy_lifestats_embeddings_status` | Check semantic embedding indexer status |
+| `aspy_stats` | Session statistics — tokens, costs, tool calls |
+| `aspy_events` | Recent events — tool calls, thinking, API usage |
+| `aspy_window` | Context window gauge — % full, warning level |
+| `aspy_sessions` | List all active sessions |
+
+### Memory Tools (Cross-Session Recall)
+
+| Tool | Description |
+|------|-------------|
+| `aspy_recall` | **PRIMARY** — Search all past sessions (semantic + keyword) |
+| `aspy_recall_thinking` | Search Claude's past reasoning |
+| `aspy_recall_prompts` | Search your past questions |
+| `aspy_recall_responses` | Search Claude's past answers |
+
+### Lifetime Tools
+
+| Tool | Description |
+|------|-------------|
+| `aspy_lifetime` | All-time usage stats across all sessions |
+| `aspy_embeddings` | Semantic search indexer status |
 
 ## Usage
 
-Once configured, Claude Code can query your session:
-
-- "How many tokens have I used?" → `aspy_stats`
-- "What tools have been called?" → `aspy_events`
-- "Am I running low on context?" → `aspy_context`
-- "Search for when we discussed authentication" → `aspy_search`
-- "Recover context about the refactor we did" → `aspy_lifestats_context`
+```
+"How many tokens have I used?"     → aspy_stats
+"Am I running out of context?"     → aspy_window
+"That thing about golf and nature" → aspy_recall (semantic handles fuzzy!)
+"All-time usage"                   → aspy_lifetime
+```
 
 ---
 
-## Claude Usage Guide
+## For Claude: Tool Selection Guide
 
-> This section is for you, Claude. Follow these guidelines when using Aspy MCP tools.
+> This section is for you, Claude. Follow these guidelines.
 
-### Session Identity
+### Quick Reference
 
-The MCP server automatically determines your identity via:
-1. `ASPY_CLIENT_ID` environment variable (if set)
-2. SHA-256 hash of `ANTHROPIC_API_KEY` (first 16 hex chars)
+| Need | Use |
+|------|-----|
+| Check context window % | `aspy_window` |
+| Session token/cost summary | `aspy_stats` |
+| Recent tool calls | `aspy_events` |
+| **Recover lost context** | `aspy_recall` ← Use this for memory! |
+| Find WHY something was decided | `aspy_recall_thinking` |
+| All-time usage summary | `aspy_lifetime` |
 
-Most tools automatically scope to your session. If identity cannot be determined, you'll see an error.
+### Memory Recall
 
-### Tool Selection Guide
+`aspy_recall` is THE tool for recovering lost context. It handles:
+- **Exact queries**: "ContextState refactor"
+- **Fuzzy queries**: "that thing about golf and nature?"
 
-| Need | Use This | Notes |
-|------|----------|-------|
-| Check context window % | `aspy_context` | Shows warning level, compacts count |
-| Session token/cost summary | `aspy_stats` | Current session only |
-| Recent tool calls | `aspy_events` | Filter by type if needed |
-| **Recover lost context** | `aspy_lifestats_context` | Searches thinking, prompts, responses |
-| Semantic + keyword search | `aspy_lifestats_context_hybrid` | Best quality if embeddings enabled |
-| Lifetime usage summary | `aspy_lifestats_stats` | All sessions, all time |
+It automatically uses semantic search if embeddings are enabled, falling back to keyword-only if not.
 
-### Context Recovery After Compaction
+### Specialized Recall (When Needed)
 
-When you receive a compacted context or lose memory:
-
-```
-1. Use aspy_lifestats_context with the topic you need
-2. Try mode="natural" with AND/OR for complex queries
-3. Fall back to specific searches if needed:
-   - aspy_lifestats_search_thinking (your reasoning)
-   - aspy_lifestats_search_prompts (what user asked)
-   - aspy_lifestats_search_responses (what you answered)
-```
+If `aspy_recall` returns too much noise, narrow with:
+- `aspy_recall_thinking` — "You noticed this pattern was meta..."
+- `aspy_recall_prompts` — "I said something about exhaustive patterns..."
+- `aspy_recall_responses` — "You recommended a hybrid ELM pattern..."
 
 ### Error Handling
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| "Context is per-session" | `/api/context` called without user ID | MCP auto-handles; check `ANTHROPIC_API_KEY` is set |
-| "Cannot determine user identity" | No API key or client ID available | Ensure Claude Code has `ANTHROPIC_API_KEY` |
-| "No active session for user" | Session not found in proxy | Wait for first API call to register session |
+| "Context is per-session" | No user ID | MCP handles this; check ANTHROPIC_API_KEY |
+| "Cannot determine user identity" | No API key | Ensure ANTHROPIC_API_KEY is set |
+| "No active session" | Session not found | Wait for first API call |
 
 ### Best Practices
 
-1. **Don't poll context constantly** — Check when user mentions context or before large operations
-2. **Use lifestats for cross-session memory** — Current session tools won't find past conversations
-3. **Trust the warning level** — `normal` (ok), `warning` (>70%), `high` (>85%), `critical` (>95%)
-4. **Proactively offer `/compact` at 90%+** — Don't wait for critical
+1. **Don't poll window constantly** — Check when user mentions context or before big ops
+2. **Use aspy_recall for memory** — It's the only search tool you need
+3. **Trust the warning level** — 🟢 normal, 🟡 >70%, 🟠 >85%, 🔴 >95%
 
 ---
 
-## Multi-Client Architecture
+## Multi-Client Setup
 
-Aspy supports multiple Claude Code instances via URL-path routing:
-
-```
-Client A → http://localhost:8080/dev-1/v1/messages
-Client B → http://localhost:8080/dev-2/v1/messages
-```
-
-Each gets isolated stats and context tracking. The MCP server uses `ASPY_CLIENT_ID` to identify which session is "you."
-
-### For Multi-Client Setups
-
-Set `ASPY_CLIENT_ID` to match your URL path prefix:
+For multiple Claude Code instances:
 
 ```bash
 claude mcp add aspy -e ASPY_CLIENT_ID=dev-1 -- npx -y aspy-mcp
 ```
+
+This matches your proxy URL path: `http://localhost:8080/dev-1/v1/messages`
 
 ## License
 
